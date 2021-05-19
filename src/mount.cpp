@@ -78,7 +78,7 @@ void Mount::mount_application_image(const std::string & pathToImage) const
 
 }
 
-void Mount::mount_overlay(const OverlayDescription & container) const
+void Mount::mount_overlay_persistent(const OverlayDescription::Persistent & container) const
 {
     if (!std::filesystem::exists(container.upper_directory))
     {
@@ -105,7 +105,20 @@ void Mount::mount_overlay(const OverlayDescription & container) const
                                     "overlay", 0,
                                     mount_args.c_str());
     if (mount_state != 0){
-        throw BadOverlayMount(errno, container);
+        throw BadOverlayMountPersistent(errno, container);
+    }
+}
+
+void Mount::mount_overlay_readonly(const OverlayDescription::ReadOnly & container) const
+{
+    const std::string mount_args(std::string("lowerdir=") + container.lower_directory.string());
+
+    const int mount_state = mount(  "overlay",
+                                    container.merge_directory.c_str(),
+                                    "overlay", 0,
+                                    mount_args.c_str());
+    if (mount_state != 0){
+        throw BadOverlayMountReadOnly(errno, container);
     }
 }
 

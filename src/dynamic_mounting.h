@@ -16,8 +16,8 @@
 
 #define DEFAULT_OVERLAY_PATH "/rw_fs/root/application/current/overlay.ini"
 #define DEFAULT_APPLICATION_PATH "/rw_fs/root/application/current"
-#define DEFAULT_UPPERDIR_PATH "/rw_fs/root/application/upperdir"
-#define DEFAULT_WORKDIR_PATH "/rw_fs/root/application/workdir"
+#define DEFAULT_UPPERDIR_PATH "/rw_fs/root/upperdir"
+#define DEFAULT_WORKDIR_PATH "/rw_fs/root/workdir"
 
 //////////////////////////////////////////////////////////////////////////////
 // Own Exceptions
@@ -103,7 +103,7 @@ class DynamicMounting
 {
     private:
         std::vector<std::string> overlay_application;
-        std::map<std::string, OverlayDescription> overlay_persistent;
+        std::map<std::string, OverlayDescription::Persistent> overlay_persistent;
         static bool application_mounted;
         const std::filesystem::path overlay_workdir, overlay_upperdir;
         const std::filesystem::path appimage_currentdir;

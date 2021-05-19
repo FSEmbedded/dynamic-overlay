@@ -1,8 +1,9 @@
 #include "dynamic_mounting.h"
 #include "preinit.h"
-
+#include <iostream>
 int main()
 {	
+	try
 	{
 		PreInit::MountArgs proc = PreInit::MountArgs();
 		proc.source_dir = std::filesystem::path("none");
@@ -36,6 +37,10 @@ int main()
 		
 		init.remove(sys.dest_dir);
 		init.remove(proc.dest_dir);
+	}
+	catch( const std::exception &err)
+	{
+		std::cerr << "Error during execution: " << err.what() << std::endl;
 	}
 	return 0;
 }

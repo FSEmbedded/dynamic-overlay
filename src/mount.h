@@ -20,33 +20,69 @@ extern "C" {
 //////////////////////////////////////////////////////////////////////////////
 // Data Class
 
-class OverlayDescription{
-    public:
-        std::filesystem::path lower_directory, work_directory, merge_directory, upper_directory;
-        OverlayDescription(){}
-        OverlayDescription(const OverlayDescription & source){
-            this->lower_directory = source.lower_directory;
-            this->work_directory = source.work_directory;
-            this->merge_directory = source.merge_directory;
-            this->upper_directory = source.upper_directory;
-        }
-        OverlayDescription(OverlayDescription && source):
-            lower_directory(std::move(source.lower_directory)),
-            work_directory(std::move(source.work_directory)),
-            merge_directory(std::move(source.merge_directory)),
-            upper_directory(std::move(source.upper_directory))
-        {
+namespace OverlayDescription
+{
+    class Persistent{
+        public:
+            std::filesystem::path lower_directory, work_directory, merge_directory, upper_directory;
 
-        }
-        OverlayDescription &operator=(const OverlayDescription &source){
-            this->lower_directory = source.lower_directory;
-            this->work_directory = source.work_directory;
-            this->merge_directory = source.merge_directory;
-            this->upper_directory = source.upper_directory;
-            return *this;
-        }
+            Persistent(){}
 
-        ~OverlayDescription(){}
+            Persistent(const Persistent & source){
+                this->lower_directory = source.lower_directory;
+                this->work_directory = source.work_directory;
+                this->merge_directory = source.merge_directory;
+                this->upper_directory = source.upper_directory;
+            }
+
+            Persistent(Persistent && source):
+                lower_directory(std::move(source.lower_directory)),
+                work_directory(std::move(source.work_directory)),
+                merge_directory(std::move(source.merge_directory)),
+                upper_directory(std::move(source.upper_directory))
+            {
+
+            }
+            
+            Persistent &operator=(const Persistent &source)
+            {
+                this->lower_directory = source.lower_directory;
+                this->work_directory = source.work_directory;
+                this->merge_directory = source.merge_directory;
+                this->upper_directory = source.upper_directory;
+                return *this;
+            }
+
+            ~Persistent(){}
+    };
+
+    class ReadOnly{
+        public:
+            std::filesystem::path lower_directory, merge_directory;
+
+            ReadOnly(){}
+
+            ReadOnly(const ReadOnly & source){
+                this->lower_directory = source.lower_directory;
+                this->merge_directory = source.merge_directory;
+            }
+
+            ReadOnly(ReadOnly && source):
+                lower_directory(std::move(source.lower_directory)),
+                merge_directory(std::move(source.merge_directory))
+            {
+
+            }
+
+            ReadOnly &operator=(const ReadOnly &source)
+            {
+                this->lower_directory = source.lower_directory;
+                this->merge_directory = source.merge_directory;
+                return *this;
+            }
+
+            ~ReadOnly(){}
+    };
 };
 
 //////////////////////////////////////////////////////////////////////////////
@@ -82,13 +118,29 @@ class BadMountApplicationImage : public std::exception
         }
 };
 
-class BadOverlayMount : public std::exception
+class BadOverlayMountPersistent : public std::exception
 {
     private:
         std::string error_string;
-        const OverlayDescription mount_args;
+        const OverlayDescription::Persistent mount_args;
     public:
-        BadOverlayMount(const int & error_var, const OverlayDescription & mount_args): mount_args(mount_args)
+        BadOverlayMountPersistent(const int & error_var, const OverlayDescription::Persistent & mount_args): mount_args(mount_args)
+        {
+            this->error_string = std::string("Mounting overlay failed with: ") + std::to_string(error_var);
+        }
+        const char * what() const throw ()
+        {
+            return this->error_string.c_str();
+        }
+};
+
+class BadOverlayMountReadOnly : public std::exception
+{
+    private:
+        std::string error_string;
+        const OverlayDescription::ReadOnly mount_args;
+    public:
+        BadOverlayMountReadOnly(const int & error_var, const OverlayDescription::ReadOnly & mount_args): mount_args(mount_args)
         {
             this->error_string = std::string("Mounting overlay failed with: ") + std::to_string(error_var);
         }
@@ -158,7 +210,8 @@ class Mount
 
         Mount();
         void mount_application_image(const std::string &) const;
-        void mount_overlay(const OverlayDescription &) const;
+        void mount_overlay_persistent(const OverlayDescription::Persistent &) const;
+        void mount_overlay_readonly(const OverlayDescription::ReadOnly &) const;
         void wrapper_c_mount(const std::filesystem::path &source_dir,
                         const std::filesystem::path &dest_dir,
                         const std::string &options,

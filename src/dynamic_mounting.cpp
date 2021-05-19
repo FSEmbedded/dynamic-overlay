@@ -1,6 +1,5 @@
 #include "dynamic_mounting.h"
 
-
 bool DynamicMounting::application_mounted = false;
 
 
@@ -58,7 +57,7 @@ void DynamicMounting::read_and_parse_ini()
         }
         else if (std::regex_match(section.get_name(), persistent_memory_image))
         {
-            this->overlay_persistent[section.get_name()] = OverlayDescription();
+            this->overlay_persistent[section.get_name()] = OverlayDescription::Persistent();
             for (auto &entry: section)
             {
                 if (entry.get_name() == "lowerdir")
@@ -95,23 +94,19 @@ void DynamicMounting::mount_overlay() const{
 
     for (const std::string &entry: this->overlay_application)
     {
-        OverlayDescription overlay_desc = OverlayDescription();
-        overlay_desc.work_directory = this->overlay_workdir;
-        overlay_desc.work_directory += std::filesystem::path(entry);
-
+        OverlayDescription::ReadOnly overlay_desc = OverlayDescription::ReadOnly();
         overlay_desc.merge_directory = std::filesystem::path(entry);
 
-        overlay_desc.upper_directory = this->overlay_upperdir;
-        overlay_desc.upper_directory += std::filesystem::path(entry);
-
         overlay_desc.lower_directory = std::filesystem::path(entry);
+        overlay_desc.lower_directory += std::filesystem::path(std::string(":") + std::string(DEFAULT_APPLICATION_PATH));
+        overlay_desc.lower_directory += std::filesystem::path(entry);
 
-        mount.mount_overlay(overlay_desc);
+        mount.mount_overlay_readonly(overlay_desc);
     }
 
     for (auto &section: this->overlay_persistent)
     {
-        mount.mount_overlay(section.second);
+        mount.mount_overlay_persistent(section.second);
     }
 }
 
