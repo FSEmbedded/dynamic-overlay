@@ -24,4 +24,4 @@ target_link_libraries(dynamic_overlay libinicpp.a)
 target_link_libraries(dynamic_overlay libubootenv.a)
 target_link_libraries(dynamic_overlay libz.a)
 
-install(TARGETS dynamic_overlay DESTINATION sbin RENAME preinit)
+install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
