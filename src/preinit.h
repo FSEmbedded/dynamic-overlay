@@ -50,7 +50,7 @@ namespace PreInit
             PreInit(PreInit &&) = delete;
             PreInit &operator=(PreInit &&) = delete;
 
-            bool prepare();
+            void prepare();
             void add(const MountArgs &);
             void remove(const std::filesystem::path &) const;
     };

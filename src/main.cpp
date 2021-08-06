@@ -1,6 +1,12 @@
 #include "dynamic_mounting.h"
 #include "preinit.h"
+#include "persistent_mem_detector.h"
+
 #include <iostream>
+#include <regex>
+#include <stdexcept>
+#include <string>
+
 int main()
 {	
 	try
@@ -18,29 +24,61 @@ int main()
 		sys.flags = 0;
 
 		PreInit::MountArgs persistent = PreInit::MountArgs();
-		persistent.source_dir = std::filesystem::path("/dev/mmcblk2p9");
-		persistent.dest_dir = std::filesystem::path("/rw_fs/root");
-		persistent.filesystem_type = "ext4";
-		persistent.flags = 0;
 
-		PreInit::PreInit init = PreInit::PreInit();
+		PreInit::PreInit init_stage1 = PreInit::PreInit();
+		PreInit::PreInit init_stage2 = PreInit::PreInit();
 
-		init.add(sys);
-		init.add(proc);
-		init.add(persistent);
 
-		init.prepare();
-		
+		init_stage1.add(sys);
+		init_stage1.add(proc);
+
+		init_stage1.prepare();
+		try 
+		{
+			PersistentMemDetector::PersistentMemDetector mem_dect;
+
+			if(mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
+			{
+				persistent.source_dir = std::filesystem::path("/dev/mmcblk2p9");
+				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
+				persistent.filesystem_type = "ext4";
+				persistent.flags = 0;
+			}
+			else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
+			{
+				persistent.source_dir = std::filesystem::path("/dev/ubi0_2");
+				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
+				persistent.filesystem_type = "ubifs";
+				persistent.flags = 0;
+			}
+			else
+			{
+				throw(std::logic_error("Illegal state"));
+			}
+
+			init_stage2.add(persistent);
+
+			init_stage2.prepare();
+		}
+		catch(...)
+		{
+			init_stage1.remove(sys.dest_dir);
+			init_stage1.remove(proc.dest_dir);
+			throw;
+		}
+
 		DynamicMounting handler = DynamicMounting();
 
 		handler.application_image();
 		
-		init.remove(sys.dest_dir);
-		init.remove(proc.dest_dir);
+		init_stage1.remove(sys.dest_dir);
+		init_stage1.remove(proc.dest_dir);
 	}
 	catch( const std::exception &err)
 	{
 		std::cerr << "Error during execution: " << err.what() << std::endl;
+		return 1;
 	}
+
 	return 0;
 }

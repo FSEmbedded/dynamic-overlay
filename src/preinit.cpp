@@ -15,7 +15,7 @@ void PreInit::PreInit::add(const MountArgs &handler)
     this->mount_prep.push_back(handler);
 }
 
-bool PreInit::PreInit::prepare()
+void PreInit::PreInit::prepare()
 {   
     Mount mount_handler = Mount();
     try 
@@ -38,9 +38,8 @@ bool PreInit::PreInit::prepare()
         {
             mount_handler.wrapper_c_umount(entry);
         }
-        return false;
+        throw;
     }
-    return true;
 }
 
 void PreInit::PreInit::remove(const std::filesystem::path &path) const
