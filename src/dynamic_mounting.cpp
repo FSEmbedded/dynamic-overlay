@@ -1,5 +1,7 @@
 #include "dynamic_mounting.h"
 
+#include <inicpp/inicpp.h>
+
 bool DynamicMounting::application_mounted = false;
 
 

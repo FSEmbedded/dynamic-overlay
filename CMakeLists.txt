@@ -4,7 +4,7 @@ project(dynamic_overlay)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# set(CMAKE_CXX_FLAGS " -Wall -Wextra -flto -O2")
+#set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -O2")
 
 # Set additional header files
 set(SOURCE_PATH "src")
@@ -18,6 +18,8 @@ set(SOURCES
 		${SOURCE_PATH}/u-boot.cpp
 		${SOURCE_PATH}/dynamic_mounting.h
 		${SOURCE_PATH}/dynamic_mounting.cpp
+		${SOURCE_PATH}/persistent_mem_detector.h
+		${SOURCE_PATH}/persistent_mem_detector.cpp
       )
 add_executable(dynamic_overlay ${SOURCES})
 target_link_libraries(dynamic_overlay libinicpp.a)

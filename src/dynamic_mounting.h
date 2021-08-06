@@ -2,7 +2,6 @@
 // Include u-boot interface
 //#include <env/fw_env.h>
 // Include c++ librarys
-#include <map>
 #include <string> 
 #include <exception>
 #include <map>
@@ -12,7 +11,6 @@
 
 #include "mount.h"
 #include "u-boot.h"
-#include <inicpp/inicpp.h>
 
 #define DEFAULT_OVERLAY_PATH "/rw_fs/root/application/current/overlay.ini"
 #define DEFAULT_APPLICATION_PATH "/rw_fs/root/application/current"
