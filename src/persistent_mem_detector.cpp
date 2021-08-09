@@ -4,7 +4,7 @@
 #include <filesystem>
 
 PersistentMemDetector::PersistentMemDetector::PersistentMemDetector():
-    nand_memory("root=/dev/ubiblock[0-1]_0"),
+    nand_memory("root=/dev/ubiblock0_[0-1]"),
     emmc_memory("root=/dev/mmcblk2p[7-8]")
 {
     
