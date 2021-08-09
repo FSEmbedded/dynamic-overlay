@@ -53,7 +53,7 @@ int main()
 			}
 			else
 			{
-				throw(std::logic_error("Illegal state"));
+				throw(std::logic_error("Could not determine current memory type (NAND|eMMC)"));
 			}
 
 			init_stage2.add(persistent);
