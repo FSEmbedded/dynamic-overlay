@@ -32,6 +32,10 @@ PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::get
         {
             return MemType::NAND;
         }
+        else
+        {
+            throw(ErrorDeterminePersistentMemory());
+        }
     }
     else
     {

@@ -41,5 +41,6 @@ const std::string UBoot::getVariable(const std::string & variableName) const
     std::string returnValue(ptr_var);
     free( (void*) ptr_var);
 	libuboot_exit(ctx);
+
     return returnValue;
 }

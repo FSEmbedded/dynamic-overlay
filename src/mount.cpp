@@ -23,7 +23,7 @@ Mount::~Mount()
 
 }
 
-void Mount::mount_application_image(const std::string & pathToImage) const
+void Mount::mount_application_image(const std::filesystem::path & pathToImage) const
 {   
     int loopctlfd, loopfd, backingfile;
     long devnr;
@@ -57,7 +57,7 @@ void Mount::mount_application_image(const std::string & pathToImage) const
         close(loopfd);
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
         close(loopctlfd);
-        throw(BadLoopDeviceCreation(errno, std::string("Could not open: \"") + pathToImage + std::string("\" image")));
+        throw(BadLoopDeviceCreation(errno, std::string("Could not open: \"") + pathToImage.string() + std::string("\" image")));
     }
 
     if (ioctl(loopfd, LOOP_SET_FD, backingfile) == -1)
@@ -67,7 +67,7 @@ void Mount::mount_application_image(const std::string & pathToImage) const
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
         close(loopctlfd);
         const std::string error = std::string("Cannot mount: \"") + loopname
-                                  + std::string("\" on \"") + pathToImage; 
+                                  + std::string("\" on \"") + pathToImage.string();
         throw(BadLoopDeviceCreation(errno, error));
     }
     
@@ -82,7 +82,7 @@ void Mount::mount_application_image(const std::string & pathToImage) const
         close(loopfd);
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
         close(loopctlfd);
-        throw BadMountApplicationImage(errno);
+        throw(BadMountApplicationImage(errno));
     }
     close(loopfd);
     close(loopctlfd);
@@ -134,7 +134,7 @@ void Mount::mount_overlay_readonly(const OverlayDescription::ReadOnly & containe
     }
 }
 
-void Mount::wrapper_c_mount( const std::filesystem::path &source_dir,
+void Mount::wrapper_c_mount( const std::filesystem::path &memory_device,
                 const std::filesystem::path &dest_dir,
                 const std::string &options,
                 const std::string &filesystem,
@@ -142,7 +142,7 @@ void Mount::wrapper_c_mount( const std::filesystem::path &source_dir,
 {
     int mount_state;
 
-    const char * ptr_source_str = source_dir.c_str();
+    const char * ptr_source_str = memory_device.c_str();
 
     const char * ptr_options_str = options.c_str();
     if ( options.length() == 0 )
@@ -163,7 +163,7 @@ void Mount::wrapper_c_mount( const std::filesystem::path &source_dir,
 
     if (mount_state != 0)
     {
-        throw(BadMount(source_dir, errno));
+        throw(BadMount(memory_device, errno));
     }
 }
 

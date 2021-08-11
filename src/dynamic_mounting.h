@@ -1,8 +1,16 @@
+/**
+ * Implement the mounting of persistent and application specific overlay.
+ *
+ * In the header file are some specific #defines
+ *
+ * #define DEFAULT_OVERLAY_PATH: The standard path to the overlay.ini with mounted application image.
+ * #define DEFAULT_APPLICATION_PATH: Where the application image is to be mounted.
+ * #define DEFAULT_UPPERDIR_PATH: Path for the upperdir overlay directory.
+ * #define DEFAULT_WORKDIR_PATH: Path to the workdir overlay directory.
+ */
+
 #pragma once
-// Include u-boot interface
-//#include <env/fw_env.h>
-// Include c++ librarys
-#include <string> 
+
 #include <exception>
 #include <map>
 #include <regex>
@@ -20,25 +28,14 @@
 //////////////////////////////////////////////////////////////////////////////
 // Own Exceptions
 
-class INIHeaderNotFound : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        INIHeaderNotFound(const std::string & error_var)
-        {
-            this->error_string = std::string("Mounting application image thrown following errno: ") + error_var;
-        }
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
 class ApplicationImageNotCorrectDefined : public std::exception
 {
     private:
         std::string error_string;
     public:
+        /**
+         * UBoot Environment variable \"application\" is wrong defined.
+         */
         ApplicationImageNotCorrectDefined()
         {
             this->error_string = std::string("In u-boot environment variable \"application\" is wrong defined ");
@@ -53,6 +50,11 @@ class ININotDefinedEntry : public std::exception
     private:
         std::string error_string;
     public:
+        /**
+         * Overlay.ini of application image has got configuration errors
+         * @param wrong_ini_section Ini section that conatins error
+         * @param wrong_ini_entry Ini entry that contains error
+         */
         ININotDefinedEntry(const std::string & wrong_ini_section, const std::string & wrong_ini_entry)
         {
             this->error_string = std::string("INI section \"") 
@@ -70,6 +72,10 @@ class ININotDefinedSection : public std::exception
     private:
         std::string error_string;
     public:
+        /**
+         * INI-Section is not defined.
+         * @param wrong_ini_section Ini section that can not be found.
+         */
         ININotDefinedSection(const std::string & wrong_ini_section)
         {
             this->error_string = std::string("INI section \"") 
@@ -86,6 +92,9 @@ class ApplicationImageAlreadyMounted : public std::exception
     private:
         std::string error_string;
     public:
+        /**
+         * Application is already mounted. Remounting is not possible and is a big error.
+         */
         ApplicationImageAlreadyMounted()
         {
             this->error_string = std::string("Application image already mounted");
@@ -114,13 +123,24 @@ class DynamicMounting
 
 
     public:
+        /**
+         * Set root upper-, work- and currentdir for persistent memory.
+         * Set regex for persitent-, and application memory in .ini file.
+         */
         DynamicMounting();
+
         DynamicMounting(const DynamicMounting &) = delete;
         DynamicMounting &operator=(const DynamicMounting &) = delete;
         DynamicMounting(DynamicMounting &&) = delete;
         DynamicMounting &operator=(DynamicMounting &&) = delete;
         
+        /**
+         * Handle the application image.
+         * Mount application, read and parse overlay.ini.
+         * Mount overlays from mounted application image.
+         * @throw ApplicationImageAlreadyMounted
+         */
         void application_image();
-        ~DynamicMounting();
 
+        ~DynamicMounting();
 };

@@ -4,6 +4,12 @@
 #include <exception>
 #include <string>
 
+/**
+ * Helper functionality to detect the persistent memory type.
+ * 
+ * The problem is, that multiple types of memory exists for the different F&S boards.
+ * This class helps to detect the right one.
+ */
 namespace PersistentMemDetector
 {
     enum class MemType
@@ -21,9 +27,13 @@ namespace PersistentMemDetector
         private:
             std::string error_msg;
         public:
+            /**
+             * Can not open commandline information. This may a not mounted /proc filesystem.
+             * @param msg Path to commandline argument.
+             */
             explicit ErrorOpenKernelParam(const std::string & msg)
             {
-                this->error_msg = std::string("Could not open kernel comandline parameters: ") + msg;
+                this->error_msg = std::string("Could not open kernel commandline parameters: ") + msg;
             }
             const char * what() const throw () {
                 return this->error_msg.c_str();
@@ -35,6 +45,9 @@ namespace PersistentMemDetector
         private:
             std::string error_msg;
         public:
+            /**
+             * Can not get persistent memory.
+             */
             ErrorDeterminePersistentMemory()
             {
                 this->error_msg = "Persistent memory could not be determined";
@@ -52,6 +65,9 @@ namespace PersistentMemDetector
             std::regex nand_memory, emmc_memory;
 
         public:
+            /**
+             * Set regex detection for NAND and eMMC.
+             */
             PersistentMemDetector();
             ~PersistentMemDetector();
 
@@ -60,6 +76,12 @@ namespace PersistentMemDetector
             PersistentMemDetector(PersistentMemDetector &&) = delete;
             PersistentMemDetector &operator=(PersistentMemDetector &&) = delete;
 
+            /**
+             * Get memory type of booted system to determine current persistent memory type for mounting.
+             * @return MemType of current memory type.
+             * @throw ErrorOpenKernelParam
+             * @throw ErrorDeterminePersistentMemory
+             */
             MemType getMemType();
     };
 };

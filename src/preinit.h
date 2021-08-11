@@ -6,9 +6,11 @@
 #include "mount.h"
 #include "dynamic_mounting.h"
 
+/**
+ *  Enqueue mount commands and execute them at one time. If one of it fails, the currently mounted filesystems will be umounted.
+ */
 namespace PreInit
 {
-    
     struct MountArgs{
         std::filesystem::path source_dir;
         std::filesystem::path dest_dir;
@@ -50,8 +52,22 @@ namespace PreInit
             PreInit(PreInit &&) = delete;
             PreInit &operator=(PreInit &&) = delete;
 
+            /**
+             * Run all enqueued mount commands.
+             * If error occurs the already mounted filesystems will be removed.
+             */
             void prepare();
+
+            /**
+             * Mount tasks can be added here as transfer object.
+             * @param handler Mount argument.
+             */
             void add(const MountArgs &);
+
+            /**
+             * Remove mount path.
+             * @param path path to mountpoint.
+             */
             void remove(const std::filesystem::path &) const;
     };
 };
