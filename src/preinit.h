@@ -17,6 +17,7 @@ namespace PreInit
         std::string options;
         std::string filesystem_type;
         unsigned long flags;
+
         MountArgs()
         {   
             this->source_dir = std::filesystem::path("");
@@ -25,6 +26,7 @@ namespace PreInit
             this->filesystem_type = std::string("");
             this->flags = 0;
         }
+        
         MountArgs(const MountArgs & cl)
         {
             this->source_dir        = cl.source_dir;

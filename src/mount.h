@@ -4,6 +4,10 @@
 #include <exception>
 #include <filesystem>
 
+extern "C" {
+    #include <sys/mount.h>
+}
+
 #define PATH_TO_MOUNT_APPIMAGE "/rw_fs/root/application/current"
 
 /**
@@ -269,7 +273,7 @@ class Mount
         /**
          * Wrapper method of mount c-function.
          * @param memory_device Source memory device, the root source.
-         * @param dest_dir Destination mapping for rooot memory device.
+         * @param dest_dir Destination mapping for root memory device.
          * @param options Mount options, keep empty when no options are set.
          * @param filesystem Filesystem type.
          * @param flag Specify the mount actions: flag=0 means new mount without any special treatment.

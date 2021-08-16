@@ -1,14 +1,14 @@
 #include "dynamic_mounting.h"
 #include "preinit.h"
 #include "persistent_mem_detector.h"
+#include "create_link.h"
 
 #include <iostream>
-#include <regex>
-#include <stdexcept>
 #include <string>
+#include <filesystem>
 
 int main()
-{	
+{
 	try
 	{
 		PreInit::MountArgs proc = PreInit::MountArgs();
@@ -24,20 +24,28 @@ int main()
 		sys.flags = 0;
 
 		PreInit::MountArgs persistent = PreInit::MountArgs();
+		
+		OverlayDescription::ReadOnly ramdisk;
 
+		PersistentMemDetector::PersistentMemDetector mem_dect;
+
+		std::filesystem::path uboot_env_path;
 		PreInit::PreInit init_stage1 = PreInit::PreInit();
-		PreInit::PreInit init_stage2 = PreInit::PreInit();
-
 
 		init_stage1.add(sys);
 		init_stage1.add(proc);
 
 		init_stage1.prepare();
-		try 
-		{
-			PersistentMemDetector::PersistentMemDetector mem_dect;
 
-			if(mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
+		uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
+		ramdisk = create_link::prepare_ramdisk(RAMFS_MOUNTPOINT, mem_dect.getMemType());
+
+		std::exception_ptr error_during_mount_persistent;
+		try
+		{
+			PreInit::PreInit init_stage2 = PreInit::PreInit();
+
+			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
 			{
 				persistent.source_dir = std::filesystem::path("/dev/mmcblk2p9");
 				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
@@ -60,24 +68,35 @@ int main()
 
 			init_stage2.prepare();
 		}
-		catch(...)
+		catch (const std::exception &err)
 		{
-			init_stage1.remove(sys.dest_dir);
-			init_stage1.remove(proc.dest_dir);
-			throw;
+			std::cerr << "Error during mount persistent memory: " << err.what() << std::endl;
 		}
 
-		DynamicMounting handler = DynamicMounting();
+		try
+		{
+			// The overlay link is not updated in this scope. It mus use "the old" path.
+			DynamicMounting handler = DynamicMounting(uboot_env_path);
 
-		handler.application_image();
+			handler.add_lower_dir_readonly_memory(ramdisk);
+			handler.application_image();
+		}
+		catch(...)
+		{
+			error_during_mount_persistent = std::current_exception();
+		}
 		
 		init_stage1.remove(sys.dest_dir);
 		init_stage1.remove(proc.dest_dir);
+
+		if(error_during_mount_persistent)
+		{
+			std::rethrow_exception(error_during_mount_persistent);
+		}
 	}
-	catch( const std::exception &err)
+	catch (const std::exception &err)
 	{
 		std::cerr << "Error during execution: " << err.what() << std::endl;
-		return 1;
 	}
 
 	return 0;

@@ -16,6 +16,7 @@
 #include <regex>
 #include <vector>
 #include <filesystem>
+#include <list>
 
 #include "mount.h"
 #include "u-boot.h"
@@ -115,11 +116,18 @@ class DynamicMounting
         const std::filesystem::path overlay_workdir, overlay_upperdir;
         const std::filesystem::path appimage_currentdir;
         const std::regex application_image_folder, persistent_memory_image;
+        const std::filesystem::path uboot_env_config;
+
+        std::list<OverlayDescription::ReadOnly> additional_lower_directory_to_persistent;
+        std::vector<std::list<OverlayDescription::ReadOnly>::iterator> used_entries_application_overlay;
+
 
         // private functions
         void mount_application() const;
         void read_and_parse_ini();
-        void mount_overlay() const;
+        void mount_overlay_application(bool application_mounted);
+        void mount_overlay_persistent();
+
 
 
     public:
@@ -127,7 +135,8 @@ class DynamicMounting
          * Set root upper-, work- and currentdir for persistent memory.
          * Set regex for persitent-, and application memory in .ini file.
          */
-        DynamicMounting();
+        DynamicMounting(const std::filesystem::path &);
+        ~DynamicMounting();
 
         DynamicMounting(const DynamicMounting &) = delete;
         DynamicMounting &operator=(const DynamicMounting &) = delete;
@@ -138,9 +147,23 @@ class DynamicMounting
          * Handle the application image.
          * Mount application, read and parse overlay.ini.
          * Mount overlays from mounted application image.
+         * Mount added ReadOnly object independent of application_image.
          * @throw ApplicationImageAlreadyMounted
+         * @throw ApplicationImageNotCorrectDefined
+         * @throw ININotDefinedSection
+         * @throw ININotDefinedEntry
          */
         void application_image();
 
-        ~DynamicMounting();
+        /**
+         * In this function ReadOnly memory container are added to be stacked on the read-only memory segement.
+         * In Linux only 2 overlays can be stacked, but with multiple lower directories this can be bypassed.
+         * e.g.: lowerdir=/lower1:/lower2:/lower3
+         * This process is not limitited against multiple mount overlay commands.
+         * The overlay process is started from the right to the left.
+         * In this case lower3 overlays lower2 and this lower1.
+         * If no lowerdir ist provided in application container, will only mount the addition.
+         * Error during mounting application and persistent memory will not prohibit given ReadOnly object.
+         */
+        void add_lower_dir_readonly_memory(const OverlayDescription::ReadOnly &);
 };
