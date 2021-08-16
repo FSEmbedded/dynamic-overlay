@@ -3,12 +3,6 @@
 #include "persistent_mem_detector.h"
 #include "mount.h"
 
-#define NAND_UBOOT_ENV_PATH "/etc/fw_env.config.nand"
-#define EMMC_UBOOT_ENV_PATH "/etc/fw_env.config.mmc"
-#define NAND_RAUC_SYSTEM_CONF_PATH "/etc/rauc/system.conf.nand"
-#define EMMC_RAUC_SYSTEM_CONF_PATH "/etc/rauc/system.conf.mmc"
-
-
 namespace create_link {
 
     class CreateRAMfsMountpoint : public std::exception

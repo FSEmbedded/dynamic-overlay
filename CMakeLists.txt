@@ -4,6 +4,7 @@ project(dynamic_overlay)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+# Needed for SDK
 #set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -Os")
 
 # Set additional header files
@@ -26,10 +27,22 @@ set(SOURCES
       )
 
 add_executable(dynamic_overlay ${SOURCES})
-target_compile_definitions(dynamic_overlay PUBLIC RAMFS_MOUNTPOINT="${RAMDISK_STD_PATH}")
-target_link_libraries(dynamic_overlay libinicpp.a)
-target_link_libraries(dynamic_overlay libubootenv.a)
-target_link_libraries(dynamic_overlay libz.a)
+
+target_compile_definitions(dynamic_overlay
+	PUBLIC RAMFS_MOUNTPOINT="${RAMDISK_STD_PATH}"
+	RAUC_SYSTEM_CONF_PATH="${RAUC_SYSTEM_CONF_PATH}"
+	NAND_RAUC_SYSTEM_CONF_PATH="${NAND_RAUC_SYSTEM_CONF_PATH}"
+	EMMC_RAUC_SYSTEM_CONF_PATH="${EMMC_RAUC_SYSTEM_CONF_PATH}"
+	UBOOT_ENV_PATH="${UBOOT_ENV_PATH}"
+	NAND_UBOOT_ENV_PATH="${NAND_UBOOT_ENV_PATH}"
+	EMMC_UBOOT_ENV_PATH="${EMMC_UBOOT_ENV_PATH}"
+  )
+
+target_link_libraries(dynamic_overlay
+	libinicpp.a
+	libubootenv.a
+	libz.a
+  )
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
 install(DIRECTORY DESTINATION ${RAMDISK_STD_PATH})

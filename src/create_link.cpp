@@ -20,12 +20,12 @@ void create_link_to_system_conf(const PersistentMemDetector::MemType &type)
     if (type == PersistentMemDetector::MemType::NAND)
     {
         source = std::filesystem::path(NAND_RAUC_SYSTEM_CONF_PATH);
-        destination = std::filesystem::path("/etc/rauc/system.conf");
+        destination = std::filesystem::path(RAUC_SYSTEM_CONF_PATH);
     }
     else
     {
         source = std::filesystem::path(EMMC_RAUC_SYSTEM_CONF_PATH);
-        destination = std::filesystem::path("/etc/rauc/system.conf");
+        destination = std::filesystem::path(RAUC_SYSTEM_CONF_PATH);
     }
 
     try
@@ -45,12 +45,12 @@ void create_link_to_fw_env_conf(const PersistentMemDetector::MemType &type)
     if (type == PersistentMemDetector::MemType::NAND)
     {
         source = std::filesystem::path(NAND_UBOOT_ENV_PATH);
-        destination = std::filesystem::path("/etc/fw_env.config");
+        destination = std::filesystem::path(UBOOT_ENV_PATH);
     }
     else
     {
         source = std::filesystem::path(EMMC_UBOOT_ENV_PATH);
-        destination = std::filesystem::path("/etc/fw_env.config");
+        destination = std::filesystem::path(UBOOT_ENV_PATH);
     }
 
     try
