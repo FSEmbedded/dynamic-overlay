@@ -38,10 +38,18 @@ target_compile_definitions(dynamic_overlay
 	EMMC_UBOOT_ENV_PATH="${EMMC_UBOOT_ENV_PATH}"
   )
 
+find_library(inicpp_lib NAMES libinicpp.a libinicpp.so)
+find_library(ubootenv_lib NAMES libubootenv.a libubootenv.so)
+find_library(z_lib NAMES lbiz.a libz.so)
+
+message("Path to library inicpp: ${inicpp_lib}")
+message("Path to library ubootenv: ${ubootenv_lib}")
+message("Path to library zlib: ${z_lib}")
+
 target_link_libraries(dynamic_overlay
-	libinicpp.a
-	libubootenv.a
-	libz.a
+	${inicpp_lib}
+	${ubootenv_lib}
+	${z_lib}
   )
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
