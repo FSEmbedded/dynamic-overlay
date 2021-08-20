@@ -127,7 +127,7 @@ class DynamicMounting
         void read_and_parse_ini();
         void mount_overlay_application(bool application_mounted);
         void mount_overlay_persistent();
-
+        bool detect_failedUpdate_app_fw_reboot() const;
 
 
     public:

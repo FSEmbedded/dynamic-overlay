@@ -3,7 +3,9 @@
 
 #include <inicpp/inicpp.h>
 #include <vector>
+#include <cstdlib>
 #include <algorithm>
+#include <functional>
 
 bool DynamicMounting::application_mounted = false;
 
@@ -23,20 +25,33 @@ void DynamicMounting::mount_application() const
     UBoot uboot = UBoot(this->uboot_env_config);
     Mount mount = Mount();
 
-    const std::string application = uboot.getVariable("application");
+    const char application = uboot.getVariable("application", std::vector<char>({'A', 'B'}));
 
-    if (application == "A")
+    if(this->detect_failedUpdate_app_fw_reboot() == false)
     {
-        mount.mount_application_image("/rw_fs/root/application/app_a.squashfs");
-    }
-    else if (application == "B")
-    {
-        mount.mount_application_image("/rw_fs/root/application/app_b.squashfs");
+        if(application == 'A')
+        {
+            mount.mount_application_image("/rw_fs/root/application/app_a.squashfs");
+        }
+        else
+        {
+            mount.mount_application_image("/rw_fs/root/application/app_b.squashfs");
+        }
     }
     else
     {
-        throw(ApplicationImageNotCorrectDefined());
+        // Means that after a failed reboot during combined firmware and application update is not resetted.
+        // This solves this piece of code.
+        if(application == 'B')
+        {
+            mount.mount_application_image("/rw_fs/root/application/app_a.squashfs");
+        }
+        else
+        {
+            mount.mount_application_image("/rw_fs/root/application/app_b.squashfs");
+        }
     }
+
 }
 
 void DynamicMounting::read_and_parse_ini()
@@ -157,6 +172,43 @@ void DynamicMounting::mount_overlay_persistent()
     }
 }
 
+bool DynamicMounting::detect_failedUpdate_app_fw_reboot() const
+{
+
+    std::function<std::vector<std::string>(const std::string &, const char)> split = [](const std::string &input, const char split) -> std::vector<std::string>
+    {
+        std::vector<std::string> return_element;
+        std::string output;
+        for (const char elem: input)
+        {
+            if (elem != split)
+            {
+                output.append(&elem,1);
+            }
+            else
+            {
+                return_element.push_back(output);
+                output.clear();
+            }
+        }
+        return_element.push_back(output);
+        output.clear();
+        return return_element;
+    };
+
+    UBoot uboot = UBoot(this->uboot_env_config);
+    const std::string boot_order = uboot.getVariable("BOOT_ORDER", std::vector<std::string>({"A B", "B A"}));
+    const std::string boot_order_old = uboot.getVariable("BOOT_ORDER_OLD", std::vector<std::string>({"A B", "B A"}));
+    const std::string rauc_cmd = uboot.getVariable("rauc_cmd", std::vector<std::string>({"rauc.slot=A", "rauc.slot=B"}));
+    const uint8_t number_of_tries_a = uboot.getVariable("BOOT_A_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
+    const uint8_t number_of_tries_b = uboot.getVariable("BOOT_B_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
+
+    const std::string current_slot = split(rauc_cmd, '=').back();
+
+    const bool firmware_update_reboot_failed = ((current_slot == split(boot_order_old, ' ').front()) && ((number_of_tries_a == 0) || (number_of_tries_b == 0))) && (boot_order_old != boot_order);
+    
+    return firmware_update_reboot_failed;
+}
 
 void DynamicMounting::application_image()
 {
