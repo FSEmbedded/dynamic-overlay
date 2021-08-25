@@ -86,8 +86,8 @@ int main()
 			error_during_mount_persistent = std::current_exception();
 		}
 		
-		init_stage1.remove(sys.dest_dir);
-		init_stage1.remove(proc.dest_dir);
+		init_stage1.remove(sys);
+		init_stage1.remove(proc);
 
 		if(error_during_mount_persistent)
 		{

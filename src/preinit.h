@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <exception>
+#include <stdexcept>
 
 #include "mount.h"
 #include "dynamic_mounting.h"
@@ -70,6 +72,6 @@ namespace PreInit
              * Remove mount path.
              * @param path path to mountpoint.
              */
-            void remove(const std::filesystem::path &) const;
+            void remove(const MountArgs &);
     };
 };

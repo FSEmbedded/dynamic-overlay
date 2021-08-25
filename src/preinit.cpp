@@ -1,4 +1,6 @@
 #include "preinit.h"
+#include <optional>
+#include <algorithm>
 
 PreInit::PreInit::PreInit()
 {
@@ -42,8 +44,27 @@ void PreInit::PreInit::prepare()
     }
 }
 
-void PreInit::PreInit::remove(const std::filesystem::path &path) const
+void PreInit::PreInit::remove(const MountArgs &obj)
 {
     Mount mount_handler = Mount();
-    mount_handler.wrapper_c_umount(path);
+    std::optional<std::filesystem::path> path;
+    for(const auto & entry: this->mounted_paths)
+    {
+        if(entry == obj.dest_dir)
+        {
+            path = std::optional<std::filesystem::path>(obj.dest_dir);
+            break;
+        }
+    }
+    if(path)
+    {
+        this->mounted_paths.erase(std::remove(this->mounted_paths.begin(), this->mounted_paths.end(), path.value()), this->mounted_paths.end());
+        mount_handler.wrapper_c_umount(path.value());
+    }
+    else
+    {
+        std::string error_msg = "Mount object does not contain an already mounted destination path: ";
+        error_msg += obj.dest_dir.string();
+        throw(std::logic_error(error_msg));
+    }
 }
