@@ -212,15 +212,6 @@ bool DynamicMounting::detect_failedUpdate_app_fw_reboot() const
 
 void DynamicMounting::application_image()
 {
-    if (application_mounted == true)
-    {
-        throw(ApplicationImageAlreadyMounted());
-    }
-    else
-    {
-        application_mounted = true;
-    }
-
     try
     {
         this->mount_application();
@@ -239,7 +230,6 @@ void DynamicMounting::add_lower_dir_readonly_memory(const OverlayDescription::Re
 {
     this->additional_lower_directory_to_persistent.push_back(container);
 }
-
 
 DynamicMounting::~DynamicMounting()
 {

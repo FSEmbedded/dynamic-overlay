@@ -88,23 +88,6 @@ class ININotDefinedSection : public std::exception
         }
 };
 
-class ApplicationImageAlreadyMounted : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        /**
-         * Application is already mounted. Remounting is not possible and is a big error.
-         */
-        ApplicationImageAlreadyMounted()
-        {
-            this->error_string = std::string("Application image already mounted");
-        }
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
 //////////////////////////////////////////////////////////////////////////////
 
 class DynamicMounting
