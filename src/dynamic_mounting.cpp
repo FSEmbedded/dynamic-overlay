@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <functional>
 
-bool DynamicMounting::application_mounted = false;
 
 DynamicMounting::DynamicMounting(const std::filesystem::path & fw_env): 
     overlay_workdir(DEFAULT_WORKDIR_PATH),
@@ -109,7 +108,7 @@ void DynamicMounting::read_and_parse_ini()
     }
 }
 
-void DynamicMounting::mount_overlay_application(bool application_mounted) 
+void DynamicMounting::mount_overlay_read_only(bool application_mounted_overlay_parsed)
 {
     Mount mount;
 
@@ -127,7 +126,7 @@ void DynamicMounting::mount_overlay_application(bool application_mounted)
         this->used_entries_application_overlay.clear();
     };
 
-    if (application_mounted)
+    if (application_mounted_overlay_parsed)
     {
         try
         {      
@@ -154,6 +153,7 @@ void DynamicMounting::mount_overlay_application(bool application_mounted)
         }
         catch(...)
         {
+            // Ramdisk is always mounted
             mount_ramdisk();
             throw;
         }
@@ -228,10 +228,10 @@ void DynamicMounting::application_image()
     }
     catch(...)
     {
-        this->mount_overlay_application(false);
+        this->mount_overlay_read_only(false);
         throw;
     }
-    this->mount_overlay_application(true);
+    this->mount_overlay_read_only(true);
     this->mount_overlay_persistent();
 }
 

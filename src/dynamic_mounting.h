@@ -121,11 +121,10 @@ class DynamicMounting
         std::list<OverlayDescription::ReadOnly> additional_lower_directory_to_persistent;
         std::vector<std::list<OverlayDescription::ReadOnly>::iterator> used_entries_application_overlay;
 
-
         // private functions
         void mount_application() const;
         void read_and_parse_ini();
-        void mount_overlay_application(bool application_mounted);
+        void mount_overlay_read_only(bool application_mounted_overlay_parsed);
         void mount_overlay_persistent();
         bool detect_failedUpdate_app_fw_reboot() const;
 
