@@ -39,12 +39,15 @@ std::string UBoot::getVariable(const std::string &variableName) const
     const char *ptr_var = libuboot_get_env(ctx, variableName.c_str());
     if (ptr_var == NULL)
     {
+        libuboot_close(ctx);
         libuboot_exit(ctx);
         throw(UBootEnvAccess(variableName));
     }
 
     std::string returnValue(ptr_var);
     free((void *)ptr_var);
+
+    libuboot_close(ctx);
     libuboot_exit(ctx);
     return returnValue;
 }
