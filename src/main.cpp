@@ -44,10 +44,11 @@ int main()
 		try
 		{
 			PreInit::PreInit init_stage2 = PreInit::PreInit();
-
 			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
 			{
-				persistent.source_dir = std::filesystem::path("/dev/mmcblk2p9");
+				UBoot uboot(uboot_env_path);
+				const std::string mmcdev = uboot.getVariable("mmcdev", std::vector<std::string>({"0", "1", "2"}));
+				persistent.source_dir = std::filesystem::path(std::string("/dev/mmcdev") + mmcdev + std::string("p9"));
 				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
 				persistent.filesystem_type = "ext4";
 				persistent.flags = 0;
