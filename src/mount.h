@@ -2,7 +2,6 @@
 
 #include <string>
 #include <exception>
-#include <filesystem>
 
 extern "C" {
     #include <sys/mount.h>
@@ -24,7 +23,7 @@ namespace OverlayDescription
     // Data Class
     class Persistent{
         public:
-            std::filesystem::path lower_directory, work_directory, merge_directory, upper_directory;
+            std::string lower_directory, work_directory, merge_directory, upper_directory;
 
             Persistent(){}
 
@@ -58,7 +57,7 @@ namespace OverlayDescription
 
     class ReadOnly{
         public:
-            std::filesystem::path lower_directory, merge_directory;
+            std::string lower_directory, merge_directory;
 
             ReadOnly(){}
 
@@ -178,9 +177,9 @@ class CreateDirectoryOverlay : public std::exception
          * Can not create directories of persistent memory which are used for overlay-fs.
          * @param dir Directory path which can not be created.
          */
-        CreateDirectoryOverlay(const std::filesystem::path & dir)
+        CreateDirectoryOverlay(const std::string & dir)
         {
-            this->error_string = std::string("Mounting application image thrown following errno: ") + dir.string();
+            this->error_string = std::string("Mounting application image thrown following errno: ") + dir;
         }
         const char * what() const throw () {
             return this->error_string.c_str();
@@ -251,7 +250,7 @@ class Mount
          * @throw BadLoopDeviceCreation Error during interaction with linux kernel.
          * @throw BadMountApplicationImage Error during mount process.
          */
-        void mount_application_image(const std::filesystem::path &) const;
+        void mount_application_image(const std::string &) const;
 
         /**
          * Mount OverlayDescription::Persistent as an overlay on the current filesystem.
@@ -279,8 +278,8 @@ class Mount
          * @param flag Specify the mount actions: flag=0 means new mount without any special treatment.
          * @throw BadMount Error during mount.
          */
-        void wrapper_c_mount(const std::filesystem::path &memory_device,
-                        const std::filesystem::path &dest_dir,
+        void wrapper_c_mount(const std::string &memory_device,
+                        const std::string &dest_dir,
                         const std::string &options,
                         const std::string &filesystem,
                         const unsigned long &flag);
@@ -289,7 +288,7 @@ class Mount
          * @param path Path to mounted directory.
          * @throw BadUmount Umount is not possible.
          */
-        void wrapper_c_umount(const std::filesystem::path &);
+        void wrapper_c_umount(const std::string &);
 
         ~Mount();
 };

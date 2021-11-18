@@ -1,3 +1,4 @@
+#include "u-boot.h"
 #include "dynamic_mounting.h"
 #include "preinit.h"
 #include "persistent_mem_detector.h"
@@ -5,21 +6,21 @@
 
 #include <iostream>
 #include <string>
-#include <filesystem>
+#include <memory>
 
 int main()
 {
 	try
 	{
 		PreInit::MountArgs proc = PreInit::MountArgs();
-		proc.source_dir = std::filesystem::path("none");
-		proc.dest_dir = std::filesystem::path("/proc");
+		proc.source_dir = std::string("none");
+		proc.dest_dir = std::string("/proc");
 		proc.filesystem_type = "proc";
 		proc.flags = 0;
 
 		PreInit::MountArgs sys = PreInit::MountArgs();
-		sys.source_dir = std::filesystem::path("none");
-		sys.dest_dir = std::filesystem::path("/sys");
+		sys.source_dir = std::string("none");
+		sys.dest_dir = std::string("/sys");
 		sys.filesystem_type = "sysfs";
 		sys.flags = 0;
 
@@ -27,9 +28,6 @@ int main()
 		
 		OverlayDescription::ReadOnly ramdisk;
 
-		PersistentMemDetector::PersistentMemDetector mem_dect;
-
-		std::filesystem::path uboot_env_path;
 		PreInit::PreInit init_stage1 = PreInit::PreInit();
 
 		init_stage1.add(sys);
@@ -37,7 +35,10 @@ int main()
 
 		init_stage1.prepare();
 
-		uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
+		PersistentMemDetector::PersistentMemDetector mem_dect;
+		std::string uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
+
+		std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(uboot_env_path);
 		ramdisk = create_link::prepare_ramdisk(RAMFS_MOUNTPOINT, mem_dect.getMemType());
 
 		std::exception_ptr error_during_mount_persistent;
@@ -46,17 +47,15 @@ int main()
 			PreInit::PreInit init_stage2 = PreInit::PreInit();
 			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
 			{
-				UBoot uboot(uboot_env_path);
-				const std::string mmcdev = uboot.getVariable("mmcdev", std::vector<std::string>({"0", "1", "2"}));
-				persistent.source_dir = std::filesystem::path(std::string("/dev/mmcdev") + mmcdev + std::string("p9"));
-				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
+				persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
+				persistent.dest_dir = std::string("/rw_fs/root");
 				persistent.filesystem_type = "ext4";
 				persistent.flags = 0;
 			}
 			else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
 			{
-				persistent.source_dir = std::filesystem::path("/dev/ubi0_2");
-				persistent.dest_dir = std::filesystem::path("/rw_fs/root");
+				persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
+				persistent.dest_dir = std::string("/rw_fs/root");
 				persistent.filesystem_type = "ubifs";
 				persistent.flags = 0;
 			}
@@ -77,7 +76,7 @@ int main()
 		try
 		{
 			// The overlay link is not updated in this scope. It mus use "the old" path.
-			DynamicMounting handler = DynamicMounting(uboot_env_path);
+			DynamicMounting handler = DynamicMounting(uboot);
 
 			handler.add_lower_dir_readonly_memory(ramdisk);
 			handler.application_image();

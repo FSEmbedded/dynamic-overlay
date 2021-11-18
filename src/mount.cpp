@@ -10,7 +10,9 @@ extern "C" {
     #include <stdlib.h>
     #include <unistd.h>
 }
+
 #include <cerrno>
+#include <filesystem>
 
 Mount::Mount():
     path_to_container(PATH_TO_MOUNT_APPIMAGE)
@@ -23,7 +25,7 @@ Mount::~Mount()
 
 }
 
-void Mount::mount_application_image(const std::filesystem::path & pathToImage) const
+void Mount::mount_application_image(const std::string & pathToImage) const
 {   
     int loopctlfd, loopfd, backingfile;
     long devnr;
@@ -57,7 +59,7 @@ void Mount::mount_application_image(const std::filesystem::path & pathToImage) c
         close(loopfd);
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
         close(loopctlfd);
-        throw(BadLoopDeviceCreation(errno, std::string("Could not open: \"") + pathToImage.string() + std::string("\" image")));
+        throw(BadLoopDeviceCreation(errno, std::string("Could not open: \"") + pathToImage + std::string("\" image")));
     }
 
     if (ioctl(loopfd, LOOP_SET_FD, backingfile) == -1)
@@ -67,7 +69,7 @@ void Mount::mount_application_image(const std::filesystem::path & pathToImage) c
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
         close(loopctlfd);
         const std::string error = std::string("Cannot mount: \"") + loopname
-                                  + std::string("\" on \"") + pathToImage.string();
+                                  + std::string("\" on \"") + pathToImage;
         throw(BadLoopDeviceCreation(errno, error));
     }
     
@@ -123,7 +125,7 @@ void Mount::mount_overlay_persistent(const OverlayDescription::Persistent & cont
 
 void Mount::mount_overlay_readonly(const OverlayDescription::ReadOnly & container) const
 {
-    const std::string mount_args(std::string("lowerdir=") + container.lower_directory.string());
+    const std::string mount_args(std::string("lowerdir=") + container.lower_directory);
 
     const int mount_state = mount(  "overlay",
                                     container.merge_directory.c_str(),
@@ -134,8 +136,8 @@ void Mount::mount_overlay_readonly(const OverlayDescription::ReadOnly & containe
     }
 }
 
-void Mount::wrapper_c_mount( const std::filesystem::path &memory_device,
-                const std::filesystem::path &dest_dir,
+void Mount::wrapper_c_mount( const std::string &memory_device,
+                const std::string &dest_dir,
                 const std::string &options,
                 const std::string &filesystem,
                 const unsigned long &flag)
@@ -167,7 +169,7 @@ void Mount::wrapper_c_mount( const std::filesystem::path &memory_device,
     }
 }
 
-void Mount::wrapper_c_umount(const std::filesystem::path &path)
+void Mount::wrapper_c_umount(const std::string &path)
 {
     const int umount_state = umount(path.c_str());
     

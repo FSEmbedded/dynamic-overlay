@@ -7,8 +7,7 @@
 #include <cstdio>
 #include <string>
 #include <exception>
-#include <filesystem>
-#include "persistent_mem_detector.h"
+#include <vector>
 
 extern "C"
 {
@@ -100,7 +99,7 @@ class UBootEnvVarCanNotConvertedIntoReturnType : public std::exception
 class UBoot
 {
     private:
-        const std::filesystem::path fw_env_config_path;
+        const std::string fw_env_config_path;
         /**
          * Return variable from UBoot-Environment.
          * @param variableName Variable that should be read from UBoot-Environment.
@@ -110,7 +109,7 @@ class UBoot
          */
         std::string getVariable(const std::string &) const;
     public:
-        UBoot(const std::filesystem::path &);
+        UBoot(const std::string &);
         ~UBoot();
 
         UBoot(const UBoot &) = delete;

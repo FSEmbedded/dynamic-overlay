@@ -5,7 +5,6 @@
 #include <exception>
 #include <stdexcept>
 
-#include "mount.h"
 #include "dynamic_mounting.h"
 
 /**
@@ -14,16 +13,16 @@
 namespace PreInit
 {
     struct MountArgs{
-        std::filesystem::path source_dir;
-        std::filesystem::path dest_dir;
+        std::string source_dir;
+        std::string dest_dir;
         std::string options;
         std::string filesystem_type;
         unsigned long flags;
 
         MountArgs()
         {   
-            this->source_dir = std::filesystem::path("");
-            this->dest_dir = std::filesystem::path("");
+            this->source_dir = std::string("");
+            this->dest_dir = std::string("");
             this->options = "";
             this->filesystem_type = std::string("");
             this->flags = 0;

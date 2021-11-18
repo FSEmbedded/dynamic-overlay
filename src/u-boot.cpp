@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <algorithm>
 
-UBoot::UBoot(const std::filesystem::path & path):
+UBoot::UBoot(const std::string & path):
     fw_env_config_path(path)
 {
 
@@ -27,7 +27,7 @@ std::string UBoot::getVariable(const std::string &variableName) const
     if (libuboot_read_config(ctx, this->fw_env_config_path.c_str()) < 0)
     {
         libuboot_exit(ctx);
-        throw(UBootEnv(std::string("Reading ") + this->fw_env_config_path.string() + std::string(" failed")));
+        throw(UBootEnv(std::string("Reading ") + this->fw_env_config_path + std::string(" failed")));
     }
 
     if (libuboot_open(ctx) < 0)

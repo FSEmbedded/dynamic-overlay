@@ -64,7 +64,7 @@ void PreInit::PreInit::remove(const MountArgs &obj)
     else
     {
         std::string error_msg = "Mount object does not contain an already mounted destination path: ";
-        error_msg += obj.dest_dir.string();
+        error_msg += obj.dest_dir;
         throw(std::logic_error(error_msg));
     }
 }

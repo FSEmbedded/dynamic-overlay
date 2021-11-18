@@ -15,8 +15,8 @@
 #include <map>
 #include <regex>
 #include <vector>
-#include <filesystem>
 #include <list>
+#include <memory>
 
 #include "mount.h"
 #include "u-boot.h"
@@ -87,7 +87,6 @@ class ININotDefinedSection : public std::exception
             return this->error_string.c_str();
         }
 };
-
 //////////////////////////////////////////////////////////////////////////////
 
 class DynamicMounting
@@ -96,10 +95,10 @@ class DynamicMounting
         std::vector<std::string> overlay_application;
         std::map<std::string, OverlayDescription::Persistent> overlay_persistent;
         static bool application_mounted;
-        const std::filesystem::path overlay_workdir, overlay_upperdir;
-        const std::filesystem::path appimage_currentdir;
+        const std::string overlay_workdir, overlay_upperdir;
+        const std::string appimage_currentdir;
         const std::regex application_image_folder, persistent_memory_image;
-        const std::filesystem::path uboot_env_config;
+        std::shared_ptr<UBoot> uboot_handler;
 
         std::list<OverlayDescription::ReadOnly> additional_lower_directory_to_persistent;
         std::vector<std::list<OverlayDescription::ReadOnly>::iterator> used_entries_application_overlay;
@@ -117,7 +116,7 @@ class DynamicMounting
          * Set root upper-, work- and currentdir for persistent memory.
          * Set regex for persitent-, and application memory in .ini file.
          */
-        DynamicMounting(const std::filesystem::path &);
+        DynamicMounting(const std::shared_ptr<UBoot> &);
         ~DynamicMounting();
 
         DynamicMounting(const DynamicMounting &) = delete;

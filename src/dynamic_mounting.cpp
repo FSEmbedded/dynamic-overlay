@@ -8,23 +8,22 @@
 #include <functional>
 
 
-DynamicMounting::DynamicMounting(const std::filesystem::path & fw_env): 
+DynamicMounting::DynamicMounting(const std::shared_ptr<UBoot> & uboot):
     overlay_workdir(DEFAULT_WORKDIR_PATH),
     overlay_upperdir(DEFAULT_UPPERDIR_PATH),
     appimage_currentdir(DEFAULT_APPLICATION_PATH),
     application_image_folder(std::regex("ApplicationFolder")),
     persistent_memory_image(std::regex("PersistentMemory\\..*")),
-    uboot_env_config(fw_env)
+    uboot_handler(uboot)
 {
 
 }
 
 void DynamicMounting::mount_application() const
 {
-    UBoot uboot = UBoot(this->uboot_env_config);
     Mount mount = Mount();
 
-    const char application = uboot.getVariable("application", std::vector<char>({'A', 'B'}));
+    const char application = uboot_handler->getVariable("application", std::vector<char>({'A', 'B'}));
 
     if(this->detect_failedUpdate_app_fw_reboot() == false)
     {
@@ -81,19 +80,19 @@ void DynamicMounting::read_and_parse_ini()
             {
                 if (entry.get_name() == "lowerdir")
                 {
-                    this->overlay_persistent[section.get_name()].lower_directory = std::filesystem::path(entry.get<inicpp::string_ini_t>());
+                    this->overlay_persistent[section.get_name()].lower_directory = std::string(entry.get<inicpp::string_ini_t>());
                 }
                 else if (entry.get_name() == "upperdir")
                 {
-                    this->overlay_persistent[section.get_name()].upper_directory = std::filesystem::path(entry.get<inicpp::string_ini_t>());
+                    this->overlay_persistent[section.get_name()].upper_directory = std::string(entry.get<inicpp::string_ini_t>());
                 }
                 else if (entry.get_name() == "workdir")
                 {
-                    this->overlay_persistent[section.get_name()].work_directory = std::filesystem::path(entry.get<inicpp::string_ini_t>());
+                    this->overlay_persistent[section.get_name()].work_directory = std::string(entry.get<inicpp::string_ini_t>());
                 }
                 else if (entry.get_name() == "mergedir")
                 {
-                    this->overlay_persistent[section.get_name()].merge_directory = std::filesystem::path(entry.get<inicpp::string_ini_t>());
+                    this->overlay_persistent[section.get_name()].merge_directory = std::string(entry.get<inicpp::string_ini_t>());
                 }
                 else
                 {
@@ -117,7 +116,7 @@ void DynamicMounting::mount_overlay_read_only(bool application_mounted_overlay_p
         {
             if(std::find(used_entries_application_overlay.begin(), used_entries_application_overlay.end(), add_entry) == used_entries_application_overlay.end())
             {
-                add_entry->lower_directory = add_entry->lower_directory.string() + std::string(":") + add_entry->merge_directory.string();
+                add_entry->lower_directory = add_entry->lower_directory + std::string(":") + add_entry->merge_directory;
                 mount.mount_overlay_readonly(*add_entry);
             }
         }
@@ -133,17 +132,17 @@ void DynamicMounting::mount_overlay_read_only(bool application_mounted_overlay_p
             for (const std::string &entry : this->overlay_application)
             {
                 OverlayDescription::ReadOnly overlay_desc = OverlayDescription::ReadOnly();
-                overlay_desc.merge_directory = std::filesystem::path(entry);
+                overlay_desc.merge_directory = std::string(entry);
 
-                overlay_desc.lower_directory = std::filesystem::path(entry);
-                overlay_desc.lower_directory += std::filesystem::path(std::string(":") + std::string(DEFAULT_APPLICATION_PATH));
-                overlay_desc.lower_directory += std::filesystem::path(entry);
+                overlay_desc.lower_directory = std::string(entry);
+                overlay_desc.lower_directory += std::string(std::string(":") + std::string(DEFAULT_APPLICATION_PATH));
+                overlay_desc.lower_directory += std::string(entry);
                 
                 for (auto add_entry = this->additional_lower_directory_to_persistent.begin(); add_entry != this->additional_lower_directory_to_persistent.end(); add_entry++)
                 {
                     if (add_entry->merge_directory == overlay_desc.merge_directory)
                     {
-                        overlay_desc.lower_directory += std::filesystem::path(std::string(":") + add_entry->lower_directory.string());
+                        overlay_desc.lower_directory += std::string(std::string(":") + add_entry->lower_directory);
                         used_entries_application_overlay.push_back(add_entry);
                     }
                 }
@@ -196,12 +195,12 @@ bool DynamicMounting::detect_failedUpdate_app_fw_reboot() const
         return return_element;
     };
 
-    UBoot uboot = UBoot(this->uboot_env_config);
-    const std::string boot_order = uboot.getVariable("BOOT_ORDER", std::vector<std::string>({"A B", "B A"}));
-    const std::string boot_order_old = uboot.getVariable("BOOT_ORDER_OLD", std::vector<std::string>({"A B", "B A"}));
-    const std::string rauc_cmd = uboot.getVariable("rauc_cmd", std::vector<std::string>({"rauc.slot=A", "rauc.slot=B"}));
-    const uint8_t number_of_tries_a = uboot.getVariable("BOOT_A_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
-    const uint8_t number_of_tries_b = uboot.getVariable("BOOT_B_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
+
+    const std::string boot_order = uboot_handler->getVariable("BOOT_ORDER", std::vector<std::string>({"A B", "B A"}));
+    const std::string boot_order_old = uboot_handler->getVariable("BOOT_ORDER_OLD", std::vector<std::string>({"A B", "B A"}));
+    const std::string rauc_cmd = uboot_handler->getVariable("rauc_cmd", std::vector<std::string>({"rauc.slot=A", "rauc.slot=B"}));
+    const uint8_t number_of_tries_a = uboot_handler->getVariable("BOOT_A_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
+    const uint8_t number_of_tries_b = uboot_handler->getVariable("BOOT_B_LEFT", std::vector<uint8_t>({0, 1, 2, 3}));
 
     const std::string current_slot = split(rauc_cmd, '=').back();
 

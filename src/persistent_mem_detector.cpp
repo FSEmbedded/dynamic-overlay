@@ -5,17 +5,8 @@
 
 PersistentMemDetector::PersistentMemDetector::PersistentMemDetector():
     nand_memory("root=/dev/ubiblock0_[0-1]"),
-    emmc_memory("root=/dev/mmcblk2p[7-8]")
-{
-    
-}
-
-PersistentMemDetector::PersistentMemDetector::~PersistentMemDetector()
-{
-
-}
-
-PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::getMemType()
+    emmc_memory("root=/dev/mmcblk2p[7-8]"),
+    mem_type(MemType::None)
 {
     std::ifstream cmdline("/proc/cmdline");
 
@@ -26,11 +17,11 @@ PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::get
 
         if(std::regex_search(kernel_cmd, this->emmc_memory))
         {
-            return MemType::eMMC;
+            this->mem_type = MemType::eMMC;
         }
         else if(std::regex_search(kernel_cmd, this->nand_memory))
         {
-            return MemType::NAND;
+            this->mem_type = MemType::NAND;
         }
         else
         {
@@ -56,6 +47,32 @@ PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::get
             throw(ErrorOpenKernelParam("Unknown"));
         }
     }
-
-    return MemType::None;
 }
+
+PersistentMemDetector::PersistentMemDetector::~PersistentMemDetector()
+{
+
+}
+
+PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::getMemType() const
+{
+    return this->mem_type;
+}
+
+std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDevice(const std::shared_ptr<UBoot> &uboot_handler) const
+{
+    if (this->mem_type == MemType::eMMC)
+    {
+		const std::string mmcdev = uboot_handler->getVariable("mmcdev", std::vector<std::string>({"0", "1", "2"}));
+        return std::string(std::string("/dev/mmcblk") + mmcdev + std::string("p9"));
+    }
+    else if (this->mem_type == MemType::NAND)
+    {
+        return std::string("/dev/ubi0_2");
+    }
+    else
+    {
+        throw ErrorDeterminePersistentMemory();
+    }
+}
+
