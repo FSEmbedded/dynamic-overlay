@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <cstring>
 #include <exception>
 
 extern "C" {
@@ -99,7 +100,8 @@ class BadLoopDeviceCreation : public std::exception
          */
         BadLoopDeviceCreation(const int &error_var, const std::string &error_str)
         {
-            this->error_string = std::string("Creating loop device throw errno: \"") + std::to_string(error_var);
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
+            this->error_string = std::string("Creating loop device throw errno: \"") + std::string(std::strerror(error_var));
             this->error_string += std::string("\" while: \"") + error_str;
             this->error_string += std::string("\"");
         }
@@ -119,7 +121,9 @@ class BadMountApplicationImage : public std::exception
          */
         BadMountApplicationImage(const int & error_var)
         {
-            this->error_string = std::string("Mounting application image thrown following errno: ") + std::to_string(error_var);
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
+
+            this->error_string = std::string("Mounting application image thrown following errno: ") + std::string(std::strerror(error_var));
         }
         const char * what() const throw () {
             return this->error_string.c_str();
@@ -139,7 +143,8 @@ class BadOverlayMountPersistent : public std::exception
          */
         BadOverlayMountPersistent(const int & error_var, const OverlayDescription::Persistent & mount_args): mount_args(mount_args)
         {
-            this->error_string = std::string("Mounting overlay failed with: ") + std::to_string(error_var);
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
+            this->error_string = std::string("Mounting overlay failed with: ") + std::string(std::strerror(error_var));
         }
         const char * what() const throw ()
         {
@@ -160,7 +165,8 @@ class BadOverlayMountReadOnly : public std::exception
          */
         BadOverlayMountReadOnly(const int & error_var, const OverlayDescription::ReadOnly & mount_args): mount_args(mount_args)
         {
-            this->error_string = std::string("Mounting overlay failed with: ") + std::to_string(error_var);
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
+            this->error_string = std::string("Mounting overlay failed with: ") + std::string(std::strerror(error_var));
         }
         const char * what() const throw ()
         {
@@ -198,8 +204,9 @@ class BadMount : public std::exception
          */
         BadMount(const std::string &destr_dir, const int loc_errno)
         {
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
             this->error_string = std::string("Mount of \"") + destr_dir;
-            this->error_string += std::string("\" failed with errno: ") + std::to_string(loc_errno);
+            this->error_string += std::string("\" failed with errno: ") + std::string(std::strerror(loc_errno));
         }
 
         const char * what() const throw () {
@@ -219,8 +226,9 @@ class BadUmount : public std::exception
          */
         BadUmount(const std::string &destr_dir, const int loc_errno)
         {
+            std::setlocale(LC_MESSAGES, "en_EN.utf8");
             this->error_string = std::string("Umount of \"") + destr_dir;
-            this->error_string += std::string("\" failed with errno: ") + std::to_string(loc_errno);
+            this->error_string += std::string("\" failed with errno: ") + std::string(std::strerror(loc_errno));
         }
 
         const char * what() const throw () {
