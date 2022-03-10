@@ -95,8 +95,8 @@ class BadLoopDeviceCreation : public std::exception
     public:
         /**
          * Error during creating a loop-device for mounting an application image.
-         * @error_var Copy of errno during execution.
-         * @error_str Step of execution.
+         * @param error_var Copy of errno during execution.
+         * @param error_str Step of execution.
          */
         BadLoopDeviceCreation(const int &error_var, const std::string &error_str)
         {
@@ -235,6 +235,7 @@ class BadUmount : public std::exception
             return this->error_string.c_str();
         }
 };
+
 //////////////////////////////////////////////////////////////////////////////
 // Main Class
 

@@ -1,4 +1,5 @@
-#include"mount.h"
+#include "mount.h"
+#include "file_properties.h"
 
 // Icnludes for kernel functions mount
 extern "C" {
@@ -108,6 +109,11 @@ void Mount::mount_overlay_persistent(const OverlayDescription::Persistent & cont
         {
             throw(CreateDirectoryOverlay(container.work_directory));
         }
+    }
+
+    if (!file_properties::properties_set(container))
+    {
+        file_properties::copy_properties_lower_to_upper(container);
     }
 
     const std::string mount_args =  std::string("upperdir=") + std::string(container.upper_directory) + std::string(",") +

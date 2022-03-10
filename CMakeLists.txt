@@ -24,6 +24,8 @@ set(SOURCES
 		${SOURCE_PATH}/persistent_mem_detector.cpp
 		${SOURCE_PATH}/create_link.h
 		${SOURCE_PATH}/create_link.cpp
+		${SOURCE_PATH}/file_properties.h
+		${SOURCE_PATH}/file_properties.cpp
       )
 
 add_executable(dynamic_overlay ${SOURCES})
