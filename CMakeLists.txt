@@ -6,9 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Needed for SDK
 #set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -Os")
+#option(BUILD_X509_CERIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" ON)
 
 # Set additional header files
-set(RAMDISK_STD_PATH /ramdisk)
+set(RAMDISK_HW_CONFIG_STD_PATH /ramdisk_hw_conf)
 set(SOURCE_PATH "src")
 set(SOURCES
 		${SOURCE_PATH}/main.cpp
@@ -27,6 +28,52 @@ set(SOURCES
 		${SOURCE_PATH}/file_properties.h
 		${SOURCE_PATH}/file_properties.cpp
       )
+
+if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+	set(RAMDISK_CERT_STORE_STD_PATH /ramdisk_cert_store)
+	set(TARGET_ARCHIVE_MTD_CERT_STORE ${RAMDISK_CERT_STORE_STD_PATH}/tmp.tar.bz2)
+
+	if(NOT DEFINED TARGET_ARCHIV_DIR_PATH)
+		message(FATAL_ERROR "TARGET_ARCHIV_DIR_PATH not defined")
+		set(TARGET_ARCHIV_DIR_PATH ${TARGET_ARCHIV_DIR_PATH} CACHE)
+	endif()
+
+	if(NOT DEFINED TARGET_ADU_DIR_PATH)
+		message(FATAL_ERROR "TARGET_ADU_DIR_PATH not defined")
+		set(TARGET_ADU_DIR_PATH ${TARGET_ADU_DIR_PATH} CACHE)
+	endif()
+
+	if(NOT DEFINED SOURCE_ARCHIVE_MTD_FILE_PATH)
+		message(FATAL_ERROR "SOURCE_ARCHIVE_MTD_FILE_PATH not defined")
+		set(SOURCE_ARCHIVE_MTD_FILE_PATH ${SOURCE_ARCHIVE_MTD_FILE_PATH} CACHE)
+	endif()
+
+	if(NOT DEFINED SOURCE_ARCHIVE_MMC_FILE_PATH)
+		message(FATAL_ERROR "SOURCE_ARCHIVE_MMC_FILE_PATH not defined")
+		set(SOURCE_ARCHIVE_MMC_FILE_PATH ${SOURCE_ARCHIVE_MMC_FILE_PATH} CACHE)
+	endif()
+
+	if(NOT DEFINED FUS_AZURE_CONFIGURATION)
+		message(FATAL_ERROR "FUS_AZURE_CONFIGURATION not defined")
+		set(FUS_AZURE_CONFIGURATION ${FUS_AZURE_CONFIGURATION} CACHE)
+	endif()
+
+	if(NOT DEFINED FUS_AZURE_CERT_CERTIFICATE_NAME)
+		message(FATAL_ERROR "FUS_AZURE_CERT_CERTIFICATE_NAME not defined")
+		set(FUS_AZURE_CERT_CERTIFICATE_NAME ${FUS_AZURE_CERT_CERTIFICATE_NAME} CACHE)
+	endif()
+
+	if(NOT DEFINED FUS_AZURE_CERT_KEY_NAME)
+		message(FATAL_ERROR "FUS_AZURE_CERT_KEY_NAME not defined")
+		set(FUS_AZURE_CERT_KEY_NAME ${FUS_AZURE_CERT_KEY_NAME} CACHE)
+	endif()
+
+	set(SOURCES
+			${SOURCES}
+			${SOURCE_PATH}/x509_cert_store.h
+			${SOURCE_PATH}/x509_cert_store.cpp
+		)
+endif()
 
 add_executable(dynamic_overlay ${SOURCES})
 
@@ -60,8 +107,23 @@ if(NOT DEFINED NAND_UBOOT_ENV_PATH)
 	set(NAND_UBOOT_ENV_PATH ${NAND_UBOOT_ENV_PATH} CACHE)
 endif()
 
+if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+	target_compile_definitions(dynamic_overlay PUBLIC
+		BUILD_X509_CERIFICATE_STORE_MOUNT="${BUILD_X509_CERIFICATE_STORE_MOUNT}"
+		TARGET_ARCHIV_DIR_PATH="${TARGET_ARCHIV_DIR_PATH}"
+		TARGET_ADU_DIR_PATH="${TARGET_ADU_DIR_PATH}"
+		RAMFS_CERT_STORE_MOUNTPOINT="${RAMDISK_CERT_STORE_STD_PATH}"
+		SOURCE_ARCHIVE_MTD_FILE_PATH="${SOURCE_ARCHIVE_MTD_FILE_PATH}"
+		SOURCE_ARCHIVE_MMC_FILE_PATH="${SOURCE_ARCHIVE_MMC_FILE_PATH}"
+		FUS_AZURE_CONFIGURATION="${FUS_AZURE_CONFIGURATION}"
+		FUS_AZURE_CERT_CERTIFICATE_NAME="${FUS_AZURE_CERT_CERTIFICATE_NAME}"
+		FUS_AZURE_CERT_KEY_NAME="${FUS_AZURE_CERT_KEY_NAME}"
+		TARGET_ARCHIVE_MTD_CERT_STORE="${TARGET_ARCHIVE_MTD_CERT_STORE}"
+	)
+endif()
+
 target_compile_definitions(dynamic_overlay PUBLIC
-	RAMFS_MOUNTPOINT="${RAMDISK_STD_PATH}"
+	RAMFS_HW_CONFIG_MOUNTPOINT="${RAMDISK_HW_CONFIG_STD_PATH}"
 	RAUC_SYSTEM_CONF_PATH="${RAUC_SYSTEM_CONF_PATH}"
 	NAND_RAUC_SYSTEM_CONF_PATH="${NAND_RAUC_SYSTEM_CONF_PATH}"
 	EMMC_RAUC_SYSTEM_CONF_PATH="${EMMC_RAUC_SYSTEM_CONF_PATH}"
@@ -73,16 +135,27 @@ target_compile_definitions(dynamic_overlay PUBLIC
 find_library(inicpp_lib NAMES libinicpp.a libinicpp.so)
 find_library(ubootenv_lib NAMES libubootenv.a libubootenv.so)
 find_library(z_lib NAMES lbiz.a libz.so)
+find_library(jsoncpp_lib NAMES libjsoncpp_static.a libjsoncpp.so)
+
+if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+	find_library(libjsoncpp NAMES libjsoncpp_static.a)
+endif(BUILD_X509_CERIFICATE_STORE_MOUNT)
 
 message("Path to library inicpp: ${inicpp_lib}")
 message("Path to library ubootenv: ${ubootenv_lib}")
 message("Path to library zlib: ${z_lib}")
+message("Path to library jsoncpp: ${jsoncpp_lib}")
+
 
 target_link_libraries(dynamic_overlay
 	${inicpp_lib}
 	${ubootenv_lib}
 	${z_lib}
+	${jsoncpp_lib}
   )
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
-install(DIRECTORY DESTINATION ${RAMDISK_STD_PATH})
+install(DIRECTORY DESTINATION ${RAMDISK_HW_CONFIG_STD_PATH})
+if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+	install(DIRECTORY DESTINATION ${RAMDISK_CERT_STORE_STD_PATH})
+endif()

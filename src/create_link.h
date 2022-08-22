@@ -39,7 +39,7 @@ namespace create_link {
     };
 
     /**
-     * Prepare ramd disk to create system internal "things" on filesystem. This will be created every boot and placed inside a ramdsik.
+     * Prepare ramdisk to create system internal "things" on filesystem. This will be created every boot and placed inside a ramdsik.
      * So it is independent of the existens of an application link in overlay.ini or a working persistent memory.
      * @param path_to_ramdisk Path to ramdisk in the "real" filesystem.
      * @param mem_type Current memory type of persistent filesystem.
@@ -56,5 +56,4 @@ namespace create_link {
      * @throw std::logic_error Can not determine persistent filesystem type.
      */
     std::filesystem::path get_fw_env_config(const PersistentMemDetector::MemType &);
-
 };

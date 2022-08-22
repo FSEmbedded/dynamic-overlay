@@ -4,6 +4,10 @@
 #include "persistent_mem_detector.h"
 #include "create_link.h"
 
+#ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
+	#include "x509_cert_store.h"
+#endif
+
 #include <iostream>
 #include <string>
 #include <memory>
@@ -25,7 +29,7 @@ int main()
 		sys.flags = 0;
 
 		PreInit::MountArgs persistent = PreInit::MountArgs();
-		
+
 		OverlayDescription::ReadOnly ramdisk;
 
 		PreInit::PreInit init_stage1 = PreInit::PreInit();
@@ -39,7 +43,7 @@ int main()
 		std::string uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
 
 		std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(uboot_env_path);
-		ramdisk = create_link::prepare_ramdisk(RAMFS_MOUNTPOINT, mem_dect.getMemType());
+		ramdisk = create_link::prepare_ramdisk(RAMFS_HW_CONFIG_MOUNTPOINT, mem_dect.getMemType());
 
 		std::exception_ptr error_during_mount_persistent;
 		try
@@ -75,10 +79,30 @@ int main()
 
 		try
 		{
-			// The overlay link is not updated in this scope. It mus use "the old" path.
+			// The overlay link is not updated in this scope. It must use "the old" path.
 			DynamicMounting handler = DynamicMounting(uboot);
 
 			handler.add_lower_dir_readonly_memory(ramdisk);
+#ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
+			OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
+
+			x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
+
+			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
+			{
+				x509_store::CertMMCstore cert_store;
+				cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+			}
+			else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
+			{
+				x509_store::CertMDTstore cert_store;
+				cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+			}
+
+			ramdisk_x509_unpacked_store = x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
+
+			handler.add_lower_dir_readonly_memory(ramdisk_x509_unpacked_store);
+#endif
 			handler.application_image();
 		}
 		catch(...)

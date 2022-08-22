@@ -26,7 +26,6 @@ bool file_properties::properties_set(const OverlayDescription::Persistent &overl
     {
         return false;
     }
-
 }
 
 void file_properties::copy_properties_lower_to_upper(const OverlayDescription::Persistent &overlay)

@@ -98,7 +98,6 @@ OverlayDescription::ReadOnly create_link::prepare_ramdisk(const std::filesystem:
     create_link_to_system_conf(mem_type);
     create_link_to_fw_env_conf(mem_type);
 
-
     mount.wrapper_c_umount("/etc");
     mount.wrapper_c_mount(
         "none",
