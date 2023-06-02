@@ -10,6 +10,8 @@
 #include <json/json.h>
 
 #include "mount.h"
+#include <mtd/mtd-user.h>
+#include <mtd/libmtd.h>
 
 namespace x509_store
 {
@@ -175,8 +177,14 @@ namespace x509_store
 
     class CertMDTstore: public CertStore
     {
+        private:
+            uint32_t uPartNumber;
+        private:
+            bool IsPartitionAvailable();
+            uint32_t GetPartitionNumber();
+            int ScanForPartition(const std::string part_name);
         public:
-            CertMDTstore() = default;
+            CertMDTstore():uPartNumber(255) {};
             ~CertMDTstore() = default;
             
             void ExtractCertStore(const std::filesystem::path & path_to_ramdisk);

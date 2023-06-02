@@ -68,6 +68,11 @@ if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 		set(FUS_AZURE_CERT_KEY_NAME ${FUS_AZURE_CERT_KEY_NAME} CACHE)
 	endif()
 
+	if(NOT DEFINED PART_NAME_MTD_CERT)
+		message(FATAL_ERROR "PART_NAME_MTD_CERT not defined")
+		set(PART_NAME_MTD_CERT ${PART_NAME_MTD_CERT} CACHE)
+	endif()
+
 	set(SOURCES
 			${SOURCES}
 			${SOURCE_PATH}/x509_cert_store.h
@@ -119,6 +124,7 @@ if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 		FUS_AZURE_CERT_CERTIFICATE_NAME="${FUS_AZURE_CERT_CERTIFICATE_NAME}"
 		FUS_AZURE_CERT_KEY_NAME="${FUS_AZURE_CERT_KEY_NAME}"
 		TARGET_ARCHIVE_MTD_CERT_STORE="${TARGET_ARCHIVE_MTD_CERT_STORE}"
+		PART_NAME_MTD_CERT="${PART_NAME_MTD_CERT}"
 	)
 endif()
 
@@ -133,9 +139,10 @@ target_compile_definitions(dynamic_overlay PUBLIC
   )
 
 find_library(inicpp_lib NAMES libinicpp.a libinicpp.so)
-find_library(ubootenv_lib NAMES libubootenv.a libubootenv.so)
+find_library(ubootenv_lib NAMES libubootenv.so)
 find_library(z_lib NAMES lbiz.a libz.so)
 find_library(jsoncpp_lib NAMES libjsoncpp_static.a libjsoncpp.so)
+find_library(libmtd NAMES libmtd.a libmtd.so)
 
 if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 	find_library(libjsoncpp NAMES libjsoncpp_static.a)
@@ -152,6 +159,7 @@ target_link_libraries(dynamic_overlay
 	${ubootenv_lib}
 	${z_lib}
 	${jsoncpp_lib}
+	${libmtd}
   )
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
