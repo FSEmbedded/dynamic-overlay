@@ -99,6 +99,13 @@ int main()
 				cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
 			}
 
+			/* after installation prepare for permissions */
+			int ret = ::system("chown -R adu:adu /adu");
+			if ((ret == -1) || (ret == 127))
+			{
+				throw std::runtime_error(std::string("command chown fails."));
+			}
+
 			ramdisk_x509_unpacked_store = x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
 
 			handler.add_lower_dir_readonly_memory(ramdisk_x509_unpacked_store);
