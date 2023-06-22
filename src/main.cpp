@@ -74,7 +74,7 @@ int main()
 		}
 		catch (const std::exception &err)
 		{
-			std::cerr << "Error during mount persistent memory: " << err.what() << std::endl;
+			std::cerr << "dynamicoverlay: Error during mount persistent memory: " << err.what() << std::endl;
 		}
 
 		try
@@ -87,28 +87,42 @@ int main()
 			OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
 
 			x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
+			bool handle_secure_store_fails = false;
 
-			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
-			{
-				x509_store::CertMMCstore cert_store;
-				cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+			/* Handling to extract secure store is not critical.
+			*  Handle exception from store as warnings.
+			*/
+			try {
+
+				if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
+				{
+					x509_store::CertMMCstore cert_store;
+					cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+				}
+				else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
+				{
+					x509_store::CertMDTstore cert_store;
+					cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+				}
+
+				/* after installation prepare for permissions */
+				int ret = ::system("chown -R adu:adu /adu");
+				if ((ret == -1) || (ret == 127))
+				{
+					throw ret;
+				}
+
+				ramdisk_x509_unpacked_store = x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
+
+				handler.add_lower_dir_readonly_memory(ramdisk_x509_unpacked_store);
+			} catch(std::exception const& ex) {
+				std::cerr << "dynamicoverlay: Warning, " << ex.what() << std::endl;
+			}  catch(int e) {
+				std::cerr << "dynamicoverlay: Warning, directory adu can't change own %d" << e << std::endl;
 			}
-			else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
-			{
-				x509_store::CertMDTstore cert_store;
-				cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
-			}
 
-			/* after installation prepare for permissions */
-			int ret = ::system("chown -R adu:adu /adu");
-			if ((ret == -1) || (ret == 127))
-			{
-				throw std::runtime_error(std::string("command chown fails."));
-			}
-
-			ramdisk_x509_unpacked_store = x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
-
-			handler.add_lower_dir_readonly_memory(ramdisk_x509_unpacked_store);
+			if(handle_secure_store_fails == true)
+				ramdisk_x509_unpacked_store = x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
 #endif
 			handler.application_image();
 		}
@@ -127,7 +141,7 @@ int main()
 	}
 	catch (const std::exception &err)
 	{
-		std::cerr << "Error during execution: " << err.what() << std::endl;
+		std::cerr << "dynamicoverlay: Error during execution: " << err.what() << std::endl;
 	}
 
 	return 0;
