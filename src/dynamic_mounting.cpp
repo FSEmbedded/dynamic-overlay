@@ -6,7 +6,14 @@
 #include <cstdlib>
 #include <algorithm>
 #include <functional>
+#include <filesystem>
 
+#ifndef APP_IMAGE_DIR
+#define APP_IMAGE_DIR "/rw_fs/root/application/"
+#endif
+
+#define ROLLBACK_APP_FW_REBOOT_PENDING 9
+#define INCOMPLETE_APP_FW_ROLLBACK 12
 
 DynamicMounting::DynamicMounting(const std::shared_ptr<UBoot> & uboot):
     overlay_workdir(DEFAULT_WORKDIR_PATH),
@@ -24,32 +31,47 @@ void DynamicMounting::mount_application() const
     Mount mount = Mount();
 
     const char application = uboot_handler->getVariable("application", std::vector<char>({'A', 'B'}));
+    std::filesystem::path app_mount_dir(APP_IMAGE_DIR);
+    std::string application_image("app_a.squashfs");
 
-    if(this->detect_failedUpdate_app_fw_reboot() == false)
+    if (this->detect_failedUpdate_app_fw_reboot() == false)
     {
-        if(application == 'A')
+        if (application == 'B')
         {
-            mount.mount_application_image("/rw_fs/root/application/app_a.squashfs");
-        }
-        else
-        {
-            mount.mount_application_image("/rw_fs/root/application/app_b.squashfs");
+            application_image = "app_b.squashfs";
         }
     }
     else
     {
-        // Means that after a failed reboot during combined firmware and application update is not resetted.
-        // This solves this piece of code.
-        if(application == 'B')
+        /* Detect reboot after failed update fails. This state is possible
+         *  if update fails and boot order left is 0 or
+         *  rollback is in progress.
+         */
+
+        /* Get update reboot state to check for rollback.
+         *   9 : ROLLBACK_APP_FW_REBOOT_PENDING
+         *       In case that reboot was executed before apply.
+         *   12: INCOMPLETE_APP_FW_ROLLBACK
+         *       Normal case, apply occurs.
+         */
+        const std::vector<uint8_t> allowed_update_reboot_state_variables({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+        uint8_t update_reboot_state =
+            uboot_handler->getVariable("update_reboot_state", allowed_update_reboot_state_variables);
+        /* Update fails or rollback in progress */
+        if ((application == 'B') && ((update_reboot_state == ROLLBACK_APP_FW_REBOOT_PENDING) ||
+                                     (update_reboot_state == INCOMPLETE_APP_FW_ROLLBACK)))
         {
-            mount.mount_application_image("/rw_fs/root/application/app_a.squashfs");
+            /* in case of app_b and rollback in progress*/
+            application_image = "app_b.squashfs";
         }
-        else
+        else if ((application == 'A') && ((update_reboot_state != ROLLBACK_APP_FW_REBOOT_PENDING) &&
+                                          (update_reboot_state != INCOMPLETE_APP_FW_ROLLBACK)))
         {
-            mount.mount_application_image("/rw_fs/root/application/app_b.squashfs");
-        }
+            application_image = "app_b.squashfs";
+        } /* otherwise default app_a */
     }
 
+    mount.mount_application_image((app_mount_dir / application_image.c_str()));
 }
 
 void DynamicMounting::read_and_parse_ini()
@@ -232,5 +254,4 @@ void DynamicMounting::add_lower_dir_readonly_memory(const OverlayDescription::Re
 
 DynamicMounting::~DynamicMounting()
 {
-
 }
