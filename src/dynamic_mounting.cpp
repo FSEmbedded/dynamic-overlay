@@ -245,6 +245,13 @@ void DynamicMounting::application_image()
     }
     this->mount_overlay_read_only(true);
     this->mount_overlay_persistent();
+    /* Remove tmp.app in case the file tmp.app is available
+     * This is the application update temporary file before rename to
+     * updated application image. In case update fails old version should be
+     * removed.
+     */
+    std::filesystem::path app_mount_dir(APP_IMAGE_DIR);
+    std::filesystem::remove( app_mount_dir / "tmp.app");
 }
 
 void DynamicMounting::add_lower_dir_readonly_memory(const OverlayDescription::ReadOnly & container)
