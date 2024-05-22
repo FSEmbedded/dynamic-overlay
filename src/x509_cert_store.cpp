@@ -115,7 +115,7 @@ int x509_store::CertMDTstore::ScanForPartition(const std::string part_name)
     for (i = 0; !mtd_table.eof(); i++)
     {
         getline(mtd_table, mtd_line);
-        if (mtd_line.find(PART_NAME_MTD_CERT) != std::string::npos)
+        if (mtd_line.find(part_name) != std::string::npos)
         {
             this->uPartNumber = i;
             return 0;

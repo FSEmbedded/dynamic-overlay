@@ -5,7 +5,7 @@
 
 PersistentMemDetector::PersistentMemDetector::PersistentMemDetector():
     nand_memory("root=/dev/ubiblock0_[0-1]"),
-    emmc_memory("root=/dev/mmcblk2p[7-8]"),
+    emmc_memory("root=/dev/mmcblk2p[5-6]"),
     mem_type(MemType::None)
 {
     std::ifstream cmdline("/proc/cmdline");
@@ -64,7 +64,7 @@ std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMem
     if (this->mem_type == MemType::eMMC)
     {
 		const std::string mmcdev = uboot_handler->getVariable("mmcdev", std::vector<std::string>({"0", "1", "2"}));
-        return std::string(std::string("/dev/mmcblk") + mmcdev + std::string("p9"));
+        return std::string(std::string("/dev/mmcblk") + mmcdev + std::string("p7"));
     }
     else if (this->mem_type == MemType::NAND)
     {
