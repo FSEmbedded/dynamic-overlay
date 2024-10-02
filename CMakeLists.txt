@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Needed for SDK
 #set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -Os")
-#option(BUILD_X509_CERIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" ON)
+option(BUILD_X509_CERIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" OFF)
 
 # Set additional header files
 set(RAMDISK_HW_CONFIG_STD_PATH /ramdisk_hw_conf)
@@ -27,7 +27,7 @@ set(SOURCES
 		${SOURCE_PATH}/create_link.cpp
 		${SOURCE_PATH}/file_properties.h
 		${SOURCE_PATH}/file_properties.cpp
-      )
+)
 
 if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 	set(RAMDISK_CERT_STORE_STD_PATH /ramdisk_cert_store)
@@ -154,6 +154,7 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
 	UBOOT_ENV_PATH="${UBOOT_ENV_PATH}"
 	NAND_UBOOT_ENV_PATH="${NAND_UBOOT_ENV_PATH}"
 	EMMC_UBOOT_ENV_PATH="${EMMC_UBOOT_ENV_PATH}"
+	EMMC_SECURE_PART_BLK_NR=${EMMC_SECURE_PART_BLK_NR}
 )
 
 find_library(inicpp_lib NAMES libinicpp.a libinicpp.so)
@@ -161,7 +162,6 @@ find_library(ubootenv_lib NAMES libubootenv.so)
 find_library(z_lib NAMES lbiz.a libz.so)
 find_library(jsoncpp_lib NAMES libjsoncpp_static.a libjsoncpp.so)
 find_library(blkid_lib NAMES libblkid.a libblkid.so)
-#find_library(libmtd NAMES libmtd.a libmtd.so)
 
 if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 	find_library(libjsoncpp NAMES libjsoncpp_static.a)
@@ -173,15 +173,13 @@ message("Path to library zlib: ${z_lib}")
 message("Path to library jsoncpp: ${jsoncpp_lib}")
 message("Path to library blkid: ${blkid_lib}")
 
-
 target_link_libraries(${PROJECT_NAME}
 	${inicpp_lib}
 	${ubootenv_lib}
 	${z_lib}
 	${jsoncpp_lib}
 	${blkid_lib}
-#	${libmtd}
-  )
+)
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
 install(DIRECTORY DESTINATION ${RAMDISK_HW_CONFIG_STD_PATH})

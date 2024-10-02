@@ -3,7 +3,7 @@
 #include <memory>
 #include <sstream>
 #include <vector>
-// #include <iostream> /* Add for cout... */
+#include <iostream> /* Add for cout... */
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -15,6 +15,12 @@
 #ifndef PART_NAME_MTD_CERT
 #define PART_NAME_MTD_CERT "Secure"
 #endif
+
+#ifndef FUS_AZURE_CONFIGURATION
+#define FUS_AZURE_CONFIGURATION "/adu/du-config.json"
+#endif
+
+#define DEFAULT_SECTOR_SIZE 512
 
 x509_store::CertStore::CertStore()
 {
@@ -132,7 +138,7 @@ void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &pat
     /* parse default du configuration */
     bool update_du_json = this->parseDuJsonConfig();
     /* use default file path for secure data */
-    std::string arch_mtd_file_path = SOURCE_ARCHIVE_MTD_FILE_PATH;
+    std::string arch_mtd_file_path = path_to_ramdisk;
     std::string target_mtd_cert_store = TARGET_ARCHIVE_MTD_CERT_STORE;
     int fd, fd_wr;
     struct fs_header_v1_0 *fsheader10;
@@ -173,7 +179,7 @@ void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &pat
     if (!strcmp("CERT", fsheader10->type) && (file_size > 0))
     {
         int chunk_size = sizeof(buffer);
-        fd_wr = open(target_mtd_cert_store.c_str(), O_WRONLY | O_CREAT);
+        fd_wr = open(target_mtd_cert_store.c_str(), (O_WRONLY | O_CREAT), 0600);
 
         if (fd_wr < 0)
         {
@@ -242,14 +248,77 @@ void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &pat
 void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &path_to_ramdisk)
 {
     const bool update_du_json = this->parseDuJsonConfig();
+    /* use default file path for secure data */
+    const std::filesystem::path & path_to_update_image("/dev/mmcblk2");
+    bool use_part_cert = true;
+    std::unique_ptr<struct fs_header_v1_0> fsheader10 = std::make_unique<struct fs_header_v1_0>();
+    std::ifstream update_img(path_to_update_image, (std::ifstream::in | std::ifstream::binary));
+    std::string target_update_store = (path_to_ramdisk / std::string("tmp.tar.bz2"));
+    std::string update_image_file = path_to_update_image;
+    int target_sector = EMMC_SECURE_PART_BLK_NR;
 
-    if (!std::filesystem::exists(SOURCE_ARCHIVE_MMC_FILE_PATH))
+    // open file
+    if (!update_img.good())
     {
-        throw OpenMMCDevFailed(SOURCE_ARCHIVE_MMC_FILE_PATH);
+        if (update_img.bad() || update_img.fail())
+        {
+            std::string error_str = std::string("Open file ") + update_image_file + std::string("fails");
+            throw OpenMMCDevFailed(SOURCE_ARCHIVE_MMC_FILE_PATH);
+        }
+    }
+
+    update_img.seekg(target_sector * DEFAULT_SECTOR_SIZE);
+
+    update_img.read((char *)fsheader10.get(), sizeof(struct fs_header_v1_0));
+
+    uint64_t file_size = 0;
+    file_size = fsheader10->info.file_size_high & 0xFFFFFFFF;
+    file_size = file_size << 32;
+    file_size = file_size | (fsheader10->info.file_size_low & 0xFFFFFFFF);
+
+    if (!std::strcmp("CERT", fsheader10->type) && (file_size > 0))
+    {
+        uint64_t cursor;
+        char BUFFER[BUFSIZ] = {0};
+        std::cout << "FS-Header available " << std::endl;
+        std::ofstream archive_store(target_update_store, (std::ofstream::out | std::ofstream::binary));
+        if (!archive_store.good())
+        {
+            if (archive_store.bad() || archive_store.fail())
+            {
+                std::string error_str = std::string("Open file ") + target_update_store + std::string("fails");
+                throw CreateCertStore(target_update_store);
+            }
+        }
+        for(cursor = 0; (cursor + sizeof(BUFFER)) <= file_size; cursor += sizeof(BUFFER))
+        {
+            update_img.read((char *) BUFFER, sizeof(BUFFER));
+            archive_store.write(BUFFER, sizeof(BUFFER));
+        }
+        if(cursor < file_size)
+        {
+            uint64_t rest_size = (file_size - cursor);
+            update_img.read((char *) BUFFER, rest_size);
+            archive_store.write(BUFFER, rest_size);
+        }
+        archive_store.flush();
+        archive_store.close();
+        update_img.close();
+    }
+    else
+    {
+        throw CreateCertStore(std::string("Update has wrong format"));
+    }
+
+    std::cout << "File " << target_update_store << " written." << std::endl;
+
+    if (!std::filesystem::exists(target_update_store))
+    {
+        throw OpenMMCDevFailed(target_update_store);
     }
 
     std::string cmd = uncompress_cmd_source_archive;
-    cmd += std::string(SOURCE_ARCHIVE_MMC_FILE_PATH);
+    cmd += target_update_store;
     cmd += uncompress_cmd_dest_folder;
     cmd += std::string(TARGET_ARCHIV_DIR_PATH);
 
@@ -259,7 +328,9 @@ void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &pat
         throw CouldNotExtractCertStore(SOURCE_ARCHIVE_MMC_FILE_PATH, std::string(TARGET_ARCHIV_DIR_PATH));
     }
 
-    if (update_du_json == true)
+    remove(target_update_store.c_str());
+
+    if (update_du_json == true && use_part_cert == false)
     {
         Json::StreamWriterBuilder builder_writer;
         std::unique_ptr<Json::StreamWriter> writer(builder_writer.newStreamWriter());

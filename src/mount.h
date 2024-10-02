@@ -8,7 +8,9 @@ extern "C" {
     #include <sys/mount.h>
 }
 
+#ifndef PATH_TO_MOUNT_APPIMAGE
 #define PATH_TO_MOUNT_APPIMAGE "/rw_fs/root/application/current"
+#endif
 
 /**
  * Abstract mount c-interface and add the functionality to mount persistent and read-only overlay folder.

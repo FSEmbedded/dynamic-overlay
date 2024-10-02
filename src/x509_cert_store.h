@@ -11,7 +11,7 @@
 
 #include "mount.h"
 #include <mtd/mtd-user.h>
-#include <mtd/libmtd.h>
+
 
 namespace x509_store
 {
