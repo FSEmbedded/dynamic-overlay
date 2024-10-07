@@ -69,8 +69,10 @@ namespace PersistentMemDetector
     class PersistentMemDetector
     {
     private:
-        std::regex nand_memory, emmc_memory;
+        std::regex nand_memory;
+        std::regex emmc_memory;
         MemType mem_type;
+        std::string boot_device;
 
     public:
         /**
@@ -97,5 +99,11 @@ namespace PersistentMemDetector
          * @return String of path to memory device.
          */
         std::string getPathToPersistentMemoryDevice(const std::shared_ptr<UBoot> &) const;
+
+        /**
+         * Get boot device.
+         * @return String of boot device.
+         */
+        std::string getBootDevice() const;
     };
 };

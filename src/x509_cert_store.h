@@ -201,7 +201,7 @@ namespace x509_store
             CertMMCstore() = default;
             ~CertMMCstore() = default;
 
-            void ExtractCertStore(const std::filesystem::path & path_to_ramdisk);
+            void ExtractCertStore(const std::filesystem::path & path_to_ramdisk, const std::string bootdevice);
 
             CertMMCstore(const CertMMCstore &) = delete;
             CertMMCstore &operator=(const CertMMCstore &) = delete;

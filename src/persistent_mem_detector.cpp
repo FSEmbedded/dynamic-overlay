@@ -10,15 +10,16 @@ namespace fs = std::filesystem; // Alias for filesystem
 
 /* Use default values of regular expression,
  * if it is not definded in build process.
+ * Use raw string literal to make expression simpler
 */
 /* Regular expression to detect boot device (mmc) */
 #ifndef PERSISTMEMORY_REGEX_EMMC
-#define PERSISTMEMORY_REGEX_EMMC "root=/dev/mmcblk[0-2]p[0-9]{1,3}"
+#define PERSISTMEMORY_REGEX_EMMC R"(root=\/dev\/(mmcblk[0-2]))"
 #endif
 /* Regular expression to detect boot device (nand) with ubifs.
  */
 #ifndef PERSISTMEMORY_REGEX_NAND
-#define PERSISTMEMORY_REGEX_NAND "root=/dev/ubiblock0_[0-1]"
+#define PERSISTMEMORY_REGEX_NAND R"(root=\/dev\/(ubiblock[0-2]+))"
 #endif
 
 /* Name of volume or partition of persitent memory */
@@ -35,14 +36,17 @@ PersistentMemDetector::PersistentMemDetector::PersistentMemDetector()
     {
         std::string kernel_cmd;
         std::getline(cmdline, kernel_cmd);
+        std::smatch device_match;
 
-        if (std::regex_search(kernel_cmd, this->emmc_memory))
+        if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
         {
             this->mem_type = MemType::eMMC;
+            this->boot_device = device_match[1].str();
         }
-        else if (std::regex_search(kernel_cmd, this->nand_memory))
+        else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
         {
             this->mem_type = MemType::NAND;
+            this->boot_device = device_match[1].str();
         }
         else
         {
@@ -104,43 +108,62 @@ std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMem
     }
     else if (this->mem_type == MemType::NAND)
     {
-        try
+        /* is sysfs exists*/
+        if(!std::filesystem::exists("/sys")) {
+            throw std::runtime_error("sysfs is not mounted or /sys does not exist.");
+        }
+
+        if(!this->boot_device.empty())
         {
-            std::ifstream count_file("/sys/class/ubi/ubi0/volumes_count");
-            int volumes_count = 0;
-            count_file >> volumes_count;
-            count_file.close();
+            std::string ubi_devices_path = "/sys/class/ubi";
+            std::string found_ubi_device_path = ubi_devices_path + "/" + boot_device;
 
-            // Loop through volume IDs and read their names
-            for (int volume_id = 0; volume_id < volumes_count; ++volume_id)
+            if(std::filesystem::exists(found_ubi_device_path))
             {
-                fs::path volume_name_path = "/sys/class/ubi/ubi0_" + std::to_string(volume_id) + "/name";
-
-                // Check if the path exists
-                if (fs::exists(volume_name_path))
+                try
                 {
-                    std::ifstream volume_name_file(volume_name_path);
-                    std::string volume_name;
-                    volume_name_file >> volume_name;
-                    volume_name_file.close();
+                    std::ifstream count_file((found_ubi_device_path + "/volumes_count"));
+                    int volumes_count = 0;
+                    count_file >> volumes_count;
+                    count_file.close();
 
-                    //std::cout << "Volume " << volume_id << ": " << volume_name << std::endl;
-
-                    if (volume_name == label)
+                    // Loop through volume IDs and read their names
+                    for (int volume_id = 0; volume_id < volumes_count; ++volume_id)
                     {
-                        //std::cout << "Volume '" << label << "' found!" << std::endl;
-                        return volume_name;
+                        fs::path volume_name_path = volumes_count + "_" + std::to_string(volume_id) + "/name";
+
+                        // Check if the path exists
+                        if (fs::exists(volume_name_path))
+                        {
+                            std::ifstream volume_name_file(volume_name_path);
+                            std::string volume_name;
+                            volume_name_file >> volume_name;
+                            volume_name_file.close();
+
+                            //std::cout << "Volume " << volume_id << ": " << volume_name << std::endl;
+
+                            if (volume_name == label)
+                            {
+                                //std::cout << "Volume '" << label << "' found!" << std::endl;
+                                return volume_name;
+                            }
+                        }
                     }
                 }
+                catch (const std::exception &e)
+                {
+                    std::cerr << "Error: UBI volumes not found in sysfs." << std::endl;
+                }
             }
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "Error: UBI volumes not found in sysfs." << std::endl;
         }
         storage_name = "Volume";
     }
 
     std::cerr << storage_name << " '" << label << "' not found." << std::endl;
     throw ErrorDeterminePersistentMemory();
+}
+
+std::string PersistentMemDetector::PersistentMemDetector::getBootDevice() const
+{
+    return this->boot_device;
 }

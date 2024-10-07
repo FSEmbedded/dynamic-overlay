@@ -97,7 +97,7 @@ int main()
 				if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
 				{
 					x509_store::CertMMCstore cert_store;
-					cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
+					cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT, mem_dect.getBootDevice());
 				}
 				else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
 				{

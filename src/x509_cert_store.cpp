@@ -245,11 +245,12 @@ void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &pat
     }
 }
 
-void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &path_to_ramdisk)
+void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &path_to_ramdisk, const std::string bootdevice)
 {
     const bool update_du_json = this->parseDuJsonConfig();
     /* use default file path for secure data */
-    const std::filesystem::path & path_to_update_image("/dev/mmcblk2");
+    const std::filesystem::path dev {R"(/dev)"};
+    const std::filesystem::path path_to_update_image(dev / bootdevice);
     bool use_part_cert = true;
     std::unique_ptr<struct fs_header_v1_0> fsheader10 = std::make_unique<struct fs_header_v1_0>();
     std::ifstream update_img(path_to_update_image, (std::ifstream::in | std::ifstream::binary));
