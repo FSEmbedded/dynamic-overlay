@@ -17,13 +17,13 @@ int main()
 	try
 	{
 		PreInit::MountArgs proc = PreInit::MountArgs();
-		proc.source_dir = std::string("none");
+		proc.source_dir = std::string("proc");
 		proc.dest_dir = std::string("/proc");
 		proc.filesystem_type = "proc";
 		proc.flags = 0;
 
 		PreInit::MountArgs sys = PreInit::MountArgs();
-		sys.source_dir = std::string("none");
+		sys.source_dir = std::string("sysfs");
 		sys.dest_dir = std::string("/sys");
 		sys.filesystem_type = "sysfs";
 		sys.flags = 0;
@@ -34,14 +34,16 @@ int main()
 
 		PreInit::PreInit init_stage1 = PreInit::PreInit();
 
-		init_stage1.add(sys);
+		/* First mount proc and then sysfs. This ensures
+		 * necessary system info is available before starting
+		 * other filesystems and services.
+		*/
 		init_stage1.add(proc);
-
+		init_stage1.add(sys);
 		init_stage1.prepare();
 
 		PersistentMemDetector::PersistentMemDetector mem_dect;
 		std::string uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
-
 		std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(uboot_env_path);
 		ramdisk = create_link::prepare_ramdisk(RAMFS_HW_CONFIG_MOUNTPOINT, mem_dect.getMemType());
 
@@ -67,9 +69,7 @@ int main()
 			{
 				throw(std::logic_error("Could not determine current memory type (NAND|eMMC)"));
 			}
-
 			init_stage2.add(persistent);
-
 			init_stage2.prepare();
 		}
 		catch (const std::exception &err)
@@ -81,14 +81,11 @@ int main()
 		{
 			// The overlay link is not updated in this scope. It must use "the old" path.
 			DynamicMounting handler = DynamicMounting(uboot);
-
 			handler.add_lower_dir_readonly_memory(ramdisk);
 #ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
 			OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
-
 			x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
 			bool handle_secure_store_fails = false;
-
 			/* Handling to extract secure store is not critical.
 			*  Handle exception from store as warnings.
 			*/
