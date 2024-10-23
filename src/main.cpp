@@ -51,19 +51,16 @@ int main()
 		try
 		{
 			PreInit::PreInit init_stage2 = PreInit::PreInit();
+			persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
+			persistent.dest_dir = std::string("/rw_fs/root");
+			persistent.flags = 0;
 			if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
 			{
-				persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
-				persistent.dest_dir = std::string("/rw_fs/root");
 				persistent.filesystem_type = "ext4";
-				persistent.flags = 0;
 			}
 			else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
 			{
-				persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
-				persistent.dest_dir = std::string("/rw_fs/root");
 				persistent.filesystem_type = "ubifs";
-				persistent.flags = 0;
 			}
 			else
 			{
