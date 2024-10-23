@@ -80,7 +80,7 @@ if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 		)
 endif()
 
-add_executable(dynamic_overlay ${SOURCES})
+add_executable(${PROJECT_NAME} ${SOURCES})
 
 if(NOT DEFINED RAUC_SYSTEM_CONF_PATH)
 	message(FATAL_ERROR "RAUC_SYSTEM_CONF_PATH not defined")
@@ -113,7 +113,7 @@ if(NOT DEFINED NAND_UBOOT_ENV_PATH)
 endif()
 
 if(BUILD_X509_CERIFICATE_STORE_MOUNT)
-	target_compile_definitions(dynamic_overlay PUBLIC
+	target_compile_definitions(${PROJECT_NAME} PUBLIC
 		BUILD_X509_CERIFICATE_STORE_MOUNT="${BUILD_X509_CERIFICATE_STORE_MOUNT}"
 		TARGET_ARCHIV_DIR_PATH="${TARGET_ARCHIV_DIR_PATH}"
 		TARGET_ADU_DIR_PATH="${TARGET_ADU_DIR_PATH}"
@@ -128,7 +128,25 @@ if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 	)
 endif()
 
-target_compile_definitions(dynamic_overlay PUBLIC
+if(DEFINED PERSISTMEMORY_REGEX_EMMC)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        PERSISTMEMORY_REGEX_EMMC="${PERSISTMEMORY_REGEX_EMMC}"
+    )
+endif()
+
+if(DEFINED PERSISTMEMORY_REGEX_NAND)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        PERSISTMEMORY_REGEX_NAND="${PERSISTMEMORY_REGEX_NAND}"
+    )
+endif()
+
+if(DEFINED PERSISTMEMORY_DEVICE_NAME)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        PERSISTMEMORY_DEVICE_NAME="${PERSISTMEMORY_DEVICE_NAME}"
+    )
+endif()
+
+target_compile_definitions(${PROJECT_NAME} PUBLIC
 	RAMFS_HW_CONFIG_MOUNTPOINT="${RAMDISK_HW_CONFIG_STD_PATH}"
 	RAUC_SYSTEM_CONF_PATH="${RAUC_SYSTEM_CONF_PATH}"
 	NAND_RAUC_SYSTEM_CONF_PATH="${NAND_RAUC_SYSTEM_CONF_PATH}"
@@ -136,13 +154,14 @@ target_compile_definitions(dynamic_overlay PUBLIC
 	UBOOT_ENV_PATH="${UBOOT_ENV_PATH}"
 	NAND_UBOOT_ENV_PATH="${NAND_UBOOT_ENV_PATH}"
 	EMMC_UBOOT_ENV_PATH="${EMMC_UBOOT_ENV_PATH}"
-  )
+)
 
 find_library(inicpp_lib NAMES libinicpp.a libinicpp.so)
 find_library(ubootenv_lib NAMES libubootenv.so)
 find_library(z_lib NAMES lbiz.a libz.so)
 find_library(jsoncpp_lib NAMES libjsoncpp_static.a libjsoncpp.so)
-find_library(libmtd NAMES libmtd.a libmtd.so)
+find_library(blkid_lib NAMES libblkid.a libblkid.so)
+#find_library(libmtd NAMES libmtd.a libmtd.so)
 
 if(BUILD_X509_CERIFICATE_STORE_MOUNT)
 	find_library(libjsoncpp NAMES libjsoncpp_static.a)
@@ -152,14 +171,16 @@ message("Path to library inicpp: ${inicpp_lib}")
 message("Path to library ubootenv: ${ubootenv_lib}")
 message("Path to library zlib: ${z_lib}")
 message("Path to library jsoncpp: ${jsoncpp_lib}")
+message("Path to library blkid: ${blkid_lib}")
 
 
-target_link_libraries(dynamic_overlay
+target_link_libraries(${PROJECT_NAME}
 	${inicpp_lib}
 	${ubootenv_lib}
 	${z_lib}
 	${jsoncpp_lib}
-	${libmtd}
+	${blkid_lib}
+#	${libmtd}
   )
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION /sbin)
