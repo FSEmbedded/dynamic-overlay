@@ -6,6 +6,7 @@
 #include <iostream> /* Add for cout... */
 #include <fcntl.h>
 #include <stdlib.h>
+#include <sys/stat.h>  // For stat(), chmod()
 #include <unistd.h>
 
 /* set max nr. of mtd devices to max number of ubi volumes */
@@ -193,7 +194,14 @@ void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &pat
             if (file_size < chunk_size)
                 chunk_size = file_size;
             bytes_read = read(fd, buffer, chunk_size);
-            write(fd_wr, buffer, bytes_read);
+            ssize_t written = write(fd_wr, buffer, bytes_read);
+            if (written == -1) {
+                throw std::runtime_error("Failed to write to certificate store: " +
+                                       std::string(strerror(errno)));
+            }
+            if (written != bytes_read) {
+                throw std::runtime_error("Incomplete write to certificate store");
+            }
             file_size -= bytes_read;
             if (file_size < 0)
             {
@@ -281,7 +289,9 @@ void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &pat
     {
         uint64_t cursor;
         char BUFFER[BUFSIZ] = {0};
+#ifdef DEBUG
         std::cout << "FS-Header available " << std::endl;
+#endif
         std::ofstream archive_store(target_update_store, (std::ofstream::out | std::ofstream::binary));
         if (!archive_store.good())
         {
@@ -310,8 +320,9 @@ void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &pat
     {
         throw CreateCertStore(std::string("Update has wrong format"));
     }
-
+#ifdef DEBUG
     std::cout << "File " << target_update_store << " written." << std::endl;
+#endif
 
     if (!std::filesystem::exists(target_update_store))
     {
@@ -360,7 +371,7 @@ OverlayDescription::Persistent x509_store::prepare_ramdisk_readable(const std::f
 
     Mount mount;
 
-    mount.wrapper_c_mount("none", path_to_ramdisk, "", "ramfs", 0);
+    mount.wrapper_c_mount("none", path_to_ramdisk, "size=8M", "tmpfs", 0);
 
     OverlayDescription::Persistent ramdisk;
     ramdisk.lower_directory = std::string(TARGET_ADU_DIR_PATH);
@@ -372,15 +383,50 @@ OverlayDescription::Persistent x509_store::prepare_ramdisk_readable(const std::f
     ramdisk.work_directory = path_to_ramdisk;
     ramdisk.work_directory += std::string("/work");
 
+    // Get permissions from lower directory
+    struct stat lower_stat;
+    if (stat(ramdisk.lower_directory.c_str(), &lower_stat) != 0) {
+        throw std::runtime_error("Failed to get lower directory permissions");
+    }
+
+    // Create directories
+    if (!std::filesystem::exists(ramdisk.upper_directory))
+    {
+        std::filesystem::create_directories(ramdisk.upper_directory);
+
+        // Apply permissions and ownership from lower to upper directory
+        chmod(ramdisk.upper_directory.c_str(), lower_stat.st_mode & 07777);
+        chown(ramdisk.upper_directory.c_str(), lower_stat.st_uid, lower_stat.st_gid);
+        if (chown(ramdisk.upper_directory.c_str(),
+                  lower_stat.st_uid,
+                  lower_stat.st_gid) != 0) {
+            std::cerr << "Warning: Failed to set ownership of upper directory: "
+                      << strerror(errno) << std::endl;
+        }
+    }
+
+    if (!std::filesystem::exists(ramdisk.work_directory))
+    {
+        std::filesystem::create_directories(ramdisk.work_directory);
+        // Optional: Also set the same permissions for work directory
+        chmod(ramdisk.work_directory.c_str(), lower_stat.st_mode & 07777);
+        chown(ramdisk.work_directory.c_str(), lower_stat.st_uid, lower_stat.st_gid);
+        if (chown(ramdisk.work_directory.c_str(),
+                  lower_stat.st_uid,
+                  lower_stat.st_gid) != 0) {
+            std::cerr << "Warning: Failed to set ownership of work directory: "
+                      << strerror(errno) << std::endl;
+        }
+    }
+
     mount.mount_overlay_persistent(ramdisk);
     return ramdisk;
 }
 
-OverlayDescription::ReadOnly x509_store::close_ramdisk(const std::filesystem::path &path_to_ramdisk)
+OverlayDescription::ReadOnly x509_store::prepare_readonly_overlay_from_ramdisk (const std::filesystem::path &path_to_ramdisk)
 {
     Mount mount;
-    mount.wrapper_c_umount(TARGET_ADU_DIR_PATH);
-    mount.wrapper_c_mount("none", path_to_ramdisk, "", "ramfs", MS_REMOUNT | MS_RDONLY);
+    mount.wrapper_c_mount("none", path_to_ramdisk, "", "tmpfs", MS_REMOUNT | MS_RDONLY);
 
     OverlayDescription::ReadOnly ramdisk_ro;
     ramdisk_ro.lower_directory = path_to_ramdisk;
@@ -389,4 +435,22 @@ OverlayDescription::ReadOnly x509_store::close_ramdisk(const std::filesystem::pa
     ramdisk_ro.merge_directory = TARGET_ADU_DIR_PATH;
 
     return ramdisk_ro;
+}
+
+bool x509_store::close_ramdisk(const std::filesystem::path &path_to_ramdisk)
+{
+    try {
+        // Check if the ramdisk directory exists
+        if (!std::filesystem::exists(path_to_ramdisk)) {
+            return false;
+        }
+
+        // First attempt to unmount
+        Mount mount;
+        mount.wrapper_c_umount(path_to_ramdisk);
+    } catch (const std::exception& e) {
+        // Error handling
+        return false;
+    }
+    return true;
 }

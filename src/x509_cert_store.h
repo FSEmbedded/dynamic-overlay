@@ -19,9 +19,9 @@ namespace x509_store
     {
         protected:
             std::string error_string;
-        
+
         public:
-            const char * what() const throw () 
+            const char * what() const throw ()
             {
                 return this->error_string.c_str();
             }
@@ -124,30 +124,30 @@ namespace x509_store
         public:
             CreateRAMfsMountpoint(const std::filesystem::path &path)
             {
-                this->error_msg = std::string("Error during creating mountpoint for RAMfs: ") + path.string();
+                this->error_msg = std::string("Error during creating mountpoint for tmpfs: ") + path.string();
             }
     };
 
-    struct fs_header_v0_0 {		    /* Size: 16 Bytes */
-        char magic[4];			    /* "FS" + two bytes operating system */
+    struct fs_header_v0_0 {            /* Size: 16 Bytes */
+        char magic[4];                /* "FS" + two bytes operating system */
                                     /* (e.g. "LX" for Linux) */
-        uint32_t file_size_low;		/* Image size [31:0] */
-        uint32_t file_size_high;	/* Image size [63:32] */
-        uint16_t flags;			    /* See flags below */
-        uint8_t padsize;			/* Number of padded bytes at end */
-        uint8_t version;			/* Header version x.y:
+        uint32_t file_size_low;        /* Image size [31:0] */
+        uint32_t file_size_high;    /* Image size [63:32] */
+        uint16_t flags;                /* See flags below */
+        uint8_t padsize;            /* Number of padded bytes at end */
+        uint8_t version;            /* Header version x.y:
                                         [7:4] major x, [3:0] minor y */
     };
 
-    struct fs_header_v1_0 {		    /* Size: 64 bytes */
-        struct fs_header_v0_0 info;	/* Image info, see above */
-        char type[16];			    /* Image type, e.g. "U-BOOT" */
+    struct fs_header_v1_0 {            /* Size: 64 bytes */
+        struct fs_header_v0_0 info;    /* Image info, see above */
+        char type[16];                /* Image type, e.g. "U-BOOT" */
         union {
-            char descr[32];		    /* Description, null-terminated */
-            uint8_t p8[32];		    /* 8-bit parameters */
-            uint16_t p16[16];		/* 16-bit parameters */
-            uint32_t p32[8];		/* 32-bit parameters */
-            uint64_t p64[4];		/* 64-bit parameters */
+            char descr[32];            /* Description, null-terminated */
+            uint8_t p8[32];            /* 8-bit parameters */
+            uint16_t p16[16];        /* 16-bit parameters */
+            uint32_t p32[8];        /* 32-bit parameters */
+            uint64_t p64[4];        /* 64-bit parameters */
         } param;
     };
 
@@ -158,13 +158,13 @@ namespace x509_store
             Json::Value root;
             const std::string uncompress_cmd_source_archive = "bunzip2 -c ";
             const std::string uncompress_cmd_dest_folder = " | tar x -C ";
-    
-            bool parseDuJsonConfig(); 
+
+            bool parseDuJsonConfig();
 
         public:
             CertStore();
             ~CertStore() = default;
-    
+
             CertStore(const CertStore &) = delete;
             CertStore &operator=(const CertStore &) = delete;
             CertStore(CertStore &&) = delete;
@@ -173,7 +173,8 @@ namespace x509_store
 
     OverlayDescription::Persistent prepare_ramdisk_readable(const std::filesystem::path &);
 
-    OverlayDescription::ReadOnly close_ramdisk(const std::filesystem::path &);
+    OverlayDescription::ReadOnly prepare_readonly_overlay_from_ramdisk (const std::filesystem::path &);
+    bool close_ramdisk(const std::filesystem::path &);
 
     class CertMDTstore: public CertStore
     {
@@ -186,7 +187,7 @@ namespace x509_store
         public:
             CertMDTstore():uPartNumber(255) {};
             ~CertMDTstore() = default;
-            
+
             void ExtractCertStore(const std::filesystem::path & path_to_ramdisk);
 
             CertMDTstore(const CertMDTstore &) = delete;
