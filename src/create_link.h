@@ -47,10 +47,12 @@ namespace create_link {
      * @throw CreateRAMfsMountpoint Can not create a ramdisk at given mountpoint.
      * @throw std::logic_error Can not determine persistent filesystem type.
      */
-    OverlayDescription::ReadOnly prepare_ramdisk(const std::filesystem::path &, const PersistentMemDetector::MemType &);
+    OverlayDescription::ReadOnly prepare_ramdisk(const std::filesystem::path &,
+        const PersistentMemDetector::MemType &,
+        const std::string & = std::string(""));
 
     /**
-     * Return "real" path of current UBoot-Environment path. 
+     * Return "real" path of current UBoot-Environment path.
      * @param mem_type Current memory type of persistent filesystem.
      * @return Path to matching UBoot-Environment configuration file.
      * @throw std::logic_error Can not determine persistent filesystem type.
