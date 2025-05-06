@@ -15,7 +15,7 @@ extern "C" {
 /**
  * Abstract mount c-interface and add the functionality to mount persistent and read-only overlay folder.
  *
- * Abstract the c-interface, also add some specific feature for mounting the persistent memory and 
+ * Abstract the c-interface, also add some specific feature for mounting the persistent memory and
  * application image related folders.
  *
  * #define PATH_TO_MOUNT_APPIMAGE: Default path to mount application image.
@@ -45,7 +45,7 @@ namespace OverlayDescription
             {
 
             }
-            
+
             Persistent &operator=(const Persistent &source)
             {
                 this->lower_directory = source.lower_directory;
@@ -81,6 +81,16 @@ namespace OverlayDescription
                 this->lower_directory = source.lower_directory;
                 this->merge_directory = source.merge_directory;
                 return *this;
+            }
+
+            // Add comparison operators
+            bool operator==(const ReadOnly& other) const {
+                return lower_directory == other.lower_directory &&
+                       merge_directory == other.merge_directory;
+            }
+
+            bool operator!=(const ReadOnly& other) const {
+                return !(*this == other);
             }
 
             ~ReadOnly(){}
@@ -220,6 +230,7 @@ class BadUmount : public std::exception
 {
     private:
         std::string error_string;
+        int error_code;
     public:
         /**
          * Could not umount given mounted folder.
@@ -228,13 +239,25 @@ class BadUmount : public std::exception
          */
         BadUmount(const std::string &destr_dir, const int loc_errno)
         {
+            error_code = loc_errno;
             std::setlocale(LC_MESSAGES, "en_EN.utf8");
             this->error_string = std::string("Umount of \"") + destr_dir;
             this->error_string += std::string("\" failed with errno: ") + std::string(std::strerror(loc_errno));
         }
 
+        /**
+         * Get the error message.
+         * @return The error message.
+         */
         const char * what() const throw () {
             return this->error_string.c_str();
+        }
+        /**
+         * Get the error number.
+         * @return The error number.
+         */
+        int get_errno() const {
+            return error_code;  // Annahme: error_code wurde im Konstruktor gespeichert
         }
 };
 
@@ -245,6 +268,14 @@ class Mount
 {
     private:
         const std::string path_to_container;
+
+        /**
+         * Check if a path is currently mounted
+         * @param path Path to check for active mounts
+         * @return true if path is mounted, false otherwise
+         */
+        bool is_mounted(const std::string& path) const;
+
     public:
 
         Mount();
@@ -299,7 +330,7 @@ class Mount
          * @param path Path to mounted directory.
          * @throw BadUmount Umount is not possible.
          */
-        void wrapper_c_umount(const std::string &);
+        void wrapper_c_umount(const std::string &) const;
 
         ~Mount();
 };
