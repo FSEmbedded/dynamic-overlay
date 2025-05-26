@@ -3,12 +3,14 @@
  */
 
 #pragma once
+/* include cpp headers */
 #include <cstdlib>
 #include <cstdio>
 #include <string>
 #include <exception>
 #include <vector>
 
+/* include c headers */
 extern "C"
 {
     #include <libuboot.h>
@@ -99,6 +101,10 @@ class UBootEnvVarCanNotConvertedIntoReturnType : public std::exception
 class UBoot
 {
     private:
+        /**
+         * Path to UBoot-Environment configuration file.
+         * @param fw_env_config_path Path to UBoot-Environment configuration file.
+         */
         const std::string fw_env_config_path;
         /**
          * Return variable from UBoot-Environment.
