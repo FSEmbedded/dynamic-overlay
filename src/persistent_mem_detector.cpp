@@ -1,6 +1,5 @@
 #include "persistent_mem_detector.h"
 
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -27,8 +26,13 @@ namespace fs = std::filesystem; // Alias for filesystem
 #define PERSISTMEMORY_DEVICE_NAME "data"
 #endif
 
+#ifndef PERSISTENT_MEMORY_MOUNTPOINT
+#define PERSISTENT_MEMORY_MOUNTPOINT "/rw_fs/root"
+#endif
+
 PersistentMemDetector::PersistentMemDetector::PersistentMemDetector()
-    : nand_memory(PERSISTMEMORY_REGEX_NAND), emmc_memory(PERSISTMEMORY_REGEX_EMMC), mem_type(MemType::None)
+    : nand_memory(PERSISTMEMORY_REGEX_NAND), emmc_memory(PERSISTMEMORY_REGEX_EMMC), mem_type(MemType::None),
+    boot_device(""), path_to_mountpoint(PERSISTENT_MEMORY_MOUNTPOINT)
 {
     std::ifstream cmdline("/proc/cmdline");
 
@@ -166,4 +170,9 @@ std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMem
 std::string PersistentMemDetector::PersistentMemDetector::getBootDevice() const
 {
     return this->boot_device;
+}
+
+std::filesystem::path PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDeviceMountPoint() const
+{
+    return this->path_to_mountpoint;
 }

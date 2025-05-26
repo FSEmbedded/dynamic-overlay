@@ -6,6 +6,7 @@
 #include <exception>
 #include <string>
 #include <memory>
+#include <filesystem>
 
 /**
  * Helper functionality to detect the persistent memory type.
@@ -73,6 +74,7 @@ namespace PersistentMemDetector
         std::regex emmc_memory;
         MemType mem_type;
         std::string boot_device;
+        std::filesystem::path path_to_mountpoint;
 
     public:
         /**
@@ -105,5 +107,10 @@ namespace PersistentMemDetector
          * @return String of boot device.
          */
         std::string getBootDevice() const;
+        /*
+         * Get path to persistent memory device mount point.
+         * @return Path to persistent memory device mount point.
+         */
+        std::filesystem::path getPathToPersistentMemoryDeviceMountPoint() const;
     };
 };
