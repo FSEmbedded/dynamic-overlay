@@ -80,7 +80,7 @@ void Mount::mount_application_image(const std::string &pathToImage) const
     if (mount_state != 0)
     {
 
-        ioctl(loopfd, LOOP_CLR_FD, backingfile);
+        ioctl(loopfd, LOOP_CLR_FD, 0);
         close(backingfile);
         close(loopfd);
         ioctl(loopctlfd, LOOP_CTL_REMOVE, devnr);
@@ -143,12 +143,8 @@ void Mount::mount_overlay_readonly(const OverlayDescription::ReadOnly &container
             if (e.get_errno() == EBUSY) {
                 std::cerr << "Warning: Cannot unmount existing mount because it's in use. "
                           << "Process may fail or unexpected behavior may occur." << std::endl;
-                // Consider whether to continue or abort here
-                // throw; // Uncomment to abort instead of continuing
-            } else {
-                // For other errors, rethrow
-                throw;
             }
+            throw;
         }
     }
 
@@ -223,8 +219,9 @@ void Mount::wrapper_c_umount(const std::string &path) const
 bool Mount::is_mounted(const std::string& path) const {
     std::ifstream mounts("/proc/mounts");
     std::string line;
+    const std::string target = " " + path + " ";
     while (std::getline(mounts, line)) {
-        if (line.find(path) != std::string::npos) {
+        if (line.find(target) != std::string::npos) {
             return true;
         }
     }

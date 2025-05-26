@@ -168,6 +168,11 @@ class BadOverlayMountReadOnly : public std::exception
 {
     private:
         std::string error_string;
+        /* * Copy of errno during execution.
+         * @param mount_args OverlayDescription::ReadOnly object which failed.
+         */
+        error_t error_code;
+
     public:
         const OverlayDescription::ReadOnly mount_args;
         /**
@@ -177,12 +182,20 @@ class BadOverlayMountReadOnly : public std::exception
          */
         BadOverlayMountReadOnly(const int & error_var, const OverlayDescription::ReadOnly & mount_args): mount_args(mount_args)
         {
+            error_code = error_var;
             std::setlocale(LC_MESSAGES, "en_EN.utf8");
             this->error_string = std::string("Mounting overlay failed with: ") + std::string(std::strerror(error_var));
         }
         const char * what() const throw ()
         {
             return this->error_string.c_str();
+        }
+        /**
+         * Get the error number.
+         * @return The error number.
+         */
+        int get_errno() const {
+            return error_code;
         }
 };
 
@@ -257,7 +270,7 @@ class BadUmount : public std::exception
          * @return The error number.
          */
         int get_errno() const {
-            return error_code;  // Annahme: error_code wurde im Konstruktor gespeichert
+            return error_code;
         }
 };
 
