@@ -20,7 +20,8 @@
 
 // Forward declarations
 class UBoot;
-namespace inicpp {
+namespace inicpp
+{
     class section;
 }
 
@@ -32,69 +33,26 @@ namespace inicpp {
 #define DEFAULT_UPPERDIR_PATH "/rw_fs/root/upperdir"
 #define DEFAULT_WORKDIR_PATH "/rw_fs/root/workdir"
 
-//////////////////////////////////////////////////////////////////////////////
-// Own Exceptions
-
-class ApplicationImageNotCorrectDefined : public std::exception
+class DynamicMountingException : public std::runtime_error
 {
-private:
-    std::string error_string;
-
 public:
-    /**
-     * UBoot Environment variable \"application\" is wrong defined.
-     */
-    ApplicationImageNotCorrectDefined()
-    {
-        this->error_string = std::string("In u-boot environment variable \"application\" is wrong defined ");
-    }
-    const char *what() const throw()
-    {
-        return this->error_string.c_str();
-    }
+    explicit DynamicMountingException(const std::string &message)
+        : std::runtime_error("DynamicMounting error: " + message) {}
 };
 
-class ININotDefinedEntry : public std::exception
+class MountException : public DynamicMountingException
 {
-private:
-    std::string error_string;
-
 public:
-    /**
-     * Overlay.ini of application image has got configuration errors
-     * @param wrong_ini_section Ini section that conatins error
-     * @param wrong_ini_entry Ini entry that contains error
-     */
-    ININotDefinedEntry(const std::string &wrong_ini_section, const std::string &wrong_ini_entry)
-    {
-        this->error_string = std::string("INI section \"") + wrong_ini_section + std::string("\" contains a not defined entry: ") + wrong_ini_entry;
-    }
-    const char *what() const throw()
-    {
-        return this->error_string.c_str();
-    }
+    explicit MountException(const std::string &message)
+        : DynamicMountingException("Mount error: " + message) {}
 };
 
-class ININotDefinedSection : public std::exception
+class ConfigException : public DynamicMountingException
 {
-private:
-    std::string error_string;
-
 public:
-    /**
-     * INI-Section is not defined.
-     * @param wrong_ini_section Ini section that can not be found.
-     */
-    ININotDefinedSection(const std::string &wrong_ini_section)
-    {
-        this->error_string = std::string("INI section \"") + wrong_ini_section + std::string("\" is unknown");
-    }
-    const char *what() const throw()
-    {
-        return this->error_string.c_str();
-    }
+    explicit ConfigException(const std::string &message)
+        : DynamicMountingException("Configuration error: " + message) {}
 };
-//////////////////////////////////////////////////////////////////////////////
 
 class DynamicMounting
 {
@@ -122,19 +80,19 @@ private:
      */
     std::string determine_application_image() const;
 
-     /**
+    /**
      * Parses an ApplicationFolder section from the configuration
      * @param section The section to parse
      * @throws ConfigException if parsing fails
      */
-    void parse_application_folder_section(const inicpp::section& section);
+    void parse_application_folder_section(const inicpp::section &section);
 
     /**
      * Parses a PersistentMemory section from the configuration
      * @param section The section to parse
      * @throws ConfigException if parsing fails
      */
-    void parse_persistent_memory_section(const inicpp::section& section);
+    void parse_persistent_memory_section(const inicpp::section &section);
 
 public:
     /**
