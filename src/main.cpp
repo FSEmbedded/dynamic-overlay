@@ -52,16 +52,14 @@ int main()
         init_stage1.prepare();
 
         PersistentMemDetector::PersistentMemDetector mem_dect;
-        std::string uboot_env_path = create_link::get_fw_env_config(mem_dect.getMemType());
-        std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(uboot_env_path);
-        ramdisk = create_link::prepare_ramdisk(RAMFS_HW_CONFIG_MOUNTPOINT, mem_dect.getMemType(), mem_dect.getBootDevice());
+        std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(std::string("/etc/fw_env.config"));
 
         std::exception_ptr error_during_mount_persistent;
         try
         {
             PreInit::PreInit init_stage2 = PreInit::PreInit();
             persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
-            persistent.dest_dir = std::string("/rw_fs/root");
+            persistent.dest_dir = mem_dect.getPathToPersistentMemoryDeviceMountPoint();
             persistent.flags = 0;
             if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
             {
@@ -83,11 +81,13 @@ int main()
             std::cerr << "dynamicoverlay: Error during mount persistent memory: " << err.what() << std::endl;
         }
 
+        create_link::create_link_to_system_conf(mem_dect.getMemType(), mem_dect.getBootDevice());
+        create_link::create_link_to_fw_env_conf(mem_dect.getMemType(), mem_dect.getBootDevice());
+
         try
         {
             // The overlay link is not updated in this scope. It must use "the old" path.
             DynamicMounting handler(uboot);
-            handler.add_lower_dir_readonly_memory(ramdisk);
 #ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
             OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
             x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
