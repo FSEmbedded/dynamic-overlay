@@ -6,6 +6,7 @@
 /* include cpp headers */
 #include <cstdlib>
 #include <cstdio>
+#include <cstdint> // for uint8_t
 #include <string>
 #include <exception>
 #include <vector>
