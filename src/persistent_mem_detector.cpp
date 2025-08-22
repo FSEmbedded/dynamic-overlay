@@ -34,46 +34,78 @@ PersistentMemDetector::PersistentMemDetector::PersistentMemDetector()
     : nand_memory(PERSISTMEMORY_REGEX_NAND), emmc_memory(PERSISTMEMORY_REGEX_EMMC), mem_type(MemType::None),
     boot_device(""), path_to_mountpoint(PERSISTENT_MEMORY_MOUNTPOINT)
 {
-    std::ifstream cmdline("/proc/cmdline");
-
-    if (cmdline.good())
+    std::ifstream bootdev("/sys/bdinfo/boot_dev");
+    if (bootdev.good())
     {
-        std::string kernel_cmd;
-        std::getline(cmdline, kernel_cmd);
-        std::smatch device_match;
+        std::string bootdev_str;
+        std::getline(bootdev, bootdev_str);
+        // convert to lowercase
+        std::transform(bootdev_str.begin(), bootdev_str.end(), bootdev_str.begin(),
+               [](unsigned char c){ return std::tolower(c); });
 
-        if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
+        // mmc1 -> mmcblk0, mmc2 -> mmcblk1 mmc3 -> mmcblk2
+        if (bootdev_str.find("mmc1") != std::string::npos)
         {
-            this->mem_type = MemType::eMMC;
-            this->boot_device = device_match[1].str();
+            bootdev_str = "mmcblk0";
         }
-        else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
+        else if (bootdev_str.find("mmc2") != std::string::npos)
         {
-            this->mem_type = MemType::NAND;
-            this->boot_device = device_match[1].str();
+            bootdev_str = "mmcblk1";
+        }
+        else if (bootdev_str.find("mmc3") != std::string::npos)
+        {
+            bootdev_str = "mmcblk2";
         }
         else
         {
             throw(ErrorDeterminePersistentMemory());
         }
+        this->mem_type = MemType::eMMC;
+        this->boot_device = bootdev_str;
     }
     else
     {
-        if (cmdline.eof())
+        std::ifstream cmdline("/proc/cmdline");
+
+        if (cmdline.good())
         {
-            throw(ErrorOpenKernelParam("Empty file"));
-        }
-        else if (cmdline.fail())
-        {
-            throw(ErrorOpenKernelParam("Logical error on I/O operation"));
-        }
-        else if (cmdline.bad())
-        {
-            throw(ErrorOpenKernelParam("Read/writing error on I/O operation"));
+            std::string kernel_cmd;
+            std::getline(cmdline, kernel_cmd);
+            std::smatch device_match;
+
+            if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
+            {
+                this->mem_type = MemType::eMMC;
+                this->boot_device = device_match[1].str();
+            }
+            else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
+            {
+                this->mem_type = MemType::NAND;
+                this->boot_device = device_match[1].str();
+            }
+            else
+            {
+                throw(ErrorDeterminePersistentMemory());
+            }
         }
         else
         {
-            throw(ErrorOpenKernelParam("Unknown"));
+            if (cmdline.eof())
+            {
+                throw(ErrorOpenKernelParam("Empty file"));
+            }
+            else if (cmdline.fail())
+            {
+                throw(ErrorOpenKernelParam("Logical error on I/O operation"));
+            }
+            else if (cmdline.bad())
+            {
+                throw(ErrorOpenKernelParam("Read/writing error on I/O operation"));
+            }
+            else
+            {
+                throw(ErrorOpenKernelParam("Unknown"));
+            }
         }
     }
 }
