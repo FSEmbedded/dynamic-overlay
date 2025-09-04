@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 set(RAUC_SYSTEM_CONF_PATH "/etc/rauc/system.conf" CACHE STRING "RAUC system.conf path")
 set(NAND_RAUC_SYSTEM_CONF_PATH "/etc/rauc/system.conf.nand" CACHE STRING "NAND RAUC system.conf path")
-set(EMMC_RAUC_SYSTEM_CONF_PATH "/etc/rauc/ system.conf.mmc" CACHE STRING "EMMC RAUC system.conf path")
+set(EMMC_RAUC_SYSTEM_CONF_PATH "/etc/rauc/system.conf.mmc" CACHE STRING "EMMC RAUC system.conf path")
 set(UBOOT_ENV_PATH "/etc/fw_env.config" CACHE STRING "U-Boot environment path")
 set(EMMC_UBOOT_ENV_PATH "/etc/fw_env.config.mmc" CACHE STRING "EMMC U-Boot environment path")
 set(NAND_UBOOT_ENV_PATH "/etc/fw_env.config.nand" CACHE STRING "NAND U-Boot environment path")
