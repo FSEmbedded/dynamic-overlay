@@ -13,7 +13,7 @@ set(NAND_UBOOT_ENV_PATH "/etc/fw_env.config.nand" CACHE STRING "NAND U-Boot envi
 
 # Needed for SDK
 #set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -Os")
-option(BUILD_X509_CERIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" OFF)
+option(BUILD_X509_CERTIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" OFF)
 
 # Set additional header files
 set(RAMDISK_HW_CONFIG_STD_PATH /ramdisk_hw_conf)
@@ -36,7 +36,7 @@ set(SOURCES
         ${SOURCE_PATH}/file_properties.cpp
 )
 
-if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     set(RAMDISK_CERT_STORE_STD_PATH /ramdisk_cert_store)
     set(TARGET_ARCHIVE_MTD_CERT_STORE ${RAMDISK_CERT_STORE_STD_PATH}/tmp.tar.bz2)
 
@@ -143,9 +143,9 @@ if(NOT DEFINED NAND_UBOOT_ENV_PATH)
     endif()
 endif()
 
-if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     target_compile_definitions(${PROJECT_NAME} PUBLIC
-        BUILD_X509_CERIFICATE_STORE_MOUNT="${BUILD_X509_CERIFICATE_STORE_MOUNT}"
+        BUILD_X509_CERTIFICATE_STORE_MOUNT
         TARGET_ARCHIV_DIR_PATH="${TARGET_ARCHIV_DIR_PATH}"
         TARGET_ADU_DIR_PATH="${TARGET_ADU_DIR_PATH}"
         RAMFS_CERT_STORE_MOUNTPOINT="${RAMDISK_CERT_STORE_STD_PATH}"
@@ -194,9 +194,9 @@ find_library(z_lib NAMES lbiz.a libz.so)
 find_library(jsoncpp_lib NAMES libjsoncpp_static.a libjsoncpp.so)
 find_library(blkid_lib NAMES libblkid.a libblkid.so)
 
-if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     find_library(libjsoncpp NAMES libjsoncpp_static.a)
-endif(BUILD_X509_CERIFICATE_STORE_MOUNT)
+endif(BUILD_X509_CERTIFICATE_STORE_MOUNT)
 
 message("Path to library inicpp: ${inicpp_lib}")
 message("Path to library ubootenv: ${ubootenv_lib}")
@@ -214,6 +214,6 @@ target_link_libraries(${PROJECT_NAME}
 
 install(TARGETS dynamic_overlay RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})
 install(DIRECTORY DESTINATION ${RAMDISK_HW_CONFIG_STD_PATH})
-if(BUILD_X509_CERIFICATE_STORE_MOUNT)
+if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     install(DIRECTORY DESTINATION ${RAMDISK_CERT_STORE_STD_PATH})
 endif()

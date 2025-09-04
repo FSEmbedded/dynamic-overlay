@@ -4,7 +4,7 @@
 #include "persistent_mem_detector.h"
 #include "create_link.h"
 
-#ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
+#ifdef BUILD_X509_CERTIFICATE_STORE_MOUNT
     #include "x509_cert_store.h"
 #endif
 
@@ -88,7 +88,7 @@ int main()
         {
             // The overlay link is not updated in this scope. It must use "the old" path.
             DynamicMounting handler(uboot);
-#ifdef BUILD_X509_CERIFICATE_STORE_MOUNT
+#ifdef BUILD_X509_CERTIFICATE_STORE_MOUNT
             OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
             x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
             bool handle_secure_store_fails = false;
