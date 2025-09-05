@@ -13,7 +13,9 @@ set(NAND_UBOOT_ENV_PATH "/etc/fw_env.config.nand" CACHE STRING "NAND U-Boot envi
 
 # Needed for SDK
 #set(CMAKE_CXX_FLAGS " -Wall -Wextra -s -Os")
-option(BUILD_X509_CERTIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" OFF)
+if(NOT DEFINED BUILD_X509_CERTIFICATE_STORE_MOUNT)
+    option(BUILD_X509_CERTIFICATE_STORE_MOUNT "Mount certificate for F&S Azure updater" OFF)
+endif()
 
 # Set additional header files
 set(RAMDISK_HW_CONFIG_STD_PATH /ramdisk_hw_conf)
