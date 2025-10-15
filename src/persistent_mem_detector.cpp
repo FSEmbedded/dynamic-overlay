@@ -18,7 +18,7 @@ namespace fs = std::filesystem; // Alias for filesystem
 /* Regular expression to detect boot device (nand) with ubifs.
  */
 #ifndef PERSISTMEMORY_REGEX_NAND
-#define PERSISTMEMORY_REGEX_NAND R"(root=\/dev\/(ubiblock[0-2]+))"
+#define PERSISTMEMORY_REGEX_NAND R"(root=\/dev\/(ubiblock\d+_\d+))"
 #endif
 
 /* Name of volume or partition of persitent memory */
@@ -35,78 +35,82 @@ PersistentMemDetector::PersistentMemDetector::PersistentMemDetector()
     boot_device(""), path_to_mountpoint(PERSISTENT_MEMORY_MOUNTPOINT)
 {
     std::ifstream bootdev("/sys/bdinfo/boot_dev");
-    if (bootdev.good())
+    if (bootdev)
     {
         std::string bootdev_str;
-        std::getline(bootdev, bootdev_str);
-        // convert to lowercase
-        std::transform(bootdev_str.begin(), bootdev_str.end(), bootdev_str.begin(),
-               [](unsigned char c){ return std::tolower(c); });
+        bootdev_str.reserve(16);
 
-        // mmc1 -> mmcblk0, mmc2 -> mmcblk1 mmc3 -> mmcblk2
-        if (bootdev_str.find("mmc1") != std::string::npos)
+        if (std::getline(bootdev, bootdev_str))
         {
-            bootdev_str = "mmcblk0";
+            // trim whitespace from both ends
+            bootdev_str.erase(0, bootdev_str.find_first_not_of(" \t\r\n"));
+            bootdev_str.erase(bootdev_str.find_last_not_of(" \t\r\n") + 1);
+            // convert to lowercase
+            std::transform(bootdev_str.begin(), bootdev_str.end(), bootdev_str.begin(),
+                           [](unsigned char c)
+                           { return std::tolower(c); });
+
+            if (bootdev_str.find("nand") != std::string::npos)
+            {
+                this->mem_type = MemType::NAND;
+                this->boot_device = bootdev_str;
+                // continue to parse /proc/cmdline for exact device (ubiblockX_Y, etc.)
+            }
+            else
+            {
+                // mmc1 -> mmcblk0, mmc2 -> mmcblk1 mmc3 -> mmcblk2
+                if (bootdev_str.find("mmc1") != std::string::npos)
+                {
+                    bootdev_str = "mmcblk0";
+                }
+                else if (bootdev_str.find("mmc2") != std::string::npos)
+                {
+                    bootdev_str = "mmcblk1";
+                }
+                else if (bootdev_str.find("mmc3") != std::string::npos)
+                {
+                    bootdev_str = "mmcblk2";
+                }
+                else
+                {
+                    throw(ErrorDeterminePersistentMemory());
+                }
+                this->mem_type = MemType::eMMC;
+                this->boot_device = bootdev_str;
+                return; // Successfully read the line
+            }
         }
-        else if (bootdev_str.find("mmc2") != std::string::npos)
-        {
-            bootdev_str = "mmcblk1";
-        }
-        else if (bootdev_str.find("mmc3") != std::string::npos)
-        {
-            bootdev_str = "mmcblk2";
-        }
-        else
-        {
-            throw(ErrorDeterminePersistentMemory());
-        }
+    }
+
+    // Fallback to parsing /proc/cmdline if /sys/bdinfo/boot_dev is not available
+    std::ifstream cmdline("/proc/cmdline");
+
+    if (!cmdline) {
+        throw ErrorOpenKernelParam("Cannot open /proc/cmdline");
+    }
+
+    std::string kernel_cmd;
+
+    if (!std::getline(cmdline, kernel_cmd))
+    {
+        throw ErrorOpenKernelParam("Cannot read /proc/cmdline");
+    }
+
+    std::smatch device_match;
+
+    if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
+    {
         this->mem_type = MemType::eMMC;
-        this->boot_device = bootdev_str;
+        this->boot_device = device_match[1].str();
+    }
+    else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
+    {
+        this->mem_type = MemType::NAND;
+        this->boot_device = device_match[1].str();
     }
     else
     {
-        std::ifstream cmdline("/proc/cmdline");
-
-        if (cmdline.good())
-        {
-            std::string kernel_cmd;
-            std::getline(cmdline, kernel_cmd);
-            std::smatch device_match;
-
-            if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
-            {
-                this->mem_type = MemType::eMMC;
-                this->boot_device = device_match[1].str();
-            }
-            else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
-            {
-                this->mem_type = MemType::NAND;
-                this->boot_device = device_match[1].str();
-            }
-            else
-            {
-                throw(ErrorDeterminePersistentMemory());
-            }
-        }
-        else
-        {
-            if (cmdline.eof())
-            {
-                throw(ErrorOpenKernelParam("Empty file"));
-            }
-            else if (cmdline.fail())
-            {
-                throw(ErrorOpenKernelParam("Logical error on I/O operation"));
-            }
-            else if (cmdline.bad())
-            {
-                throw(ErrorOpenKernelParam("Read/writing error on I/O operation"));
-            }
-            else
-            {
-                throw(ErrorOpenKernelParam("Unknown"));
-            }
-        }
+        throw(ErrorDeterminePersistentMemory());
     }
 }
 
@@ -151,38 +155,69 @@ std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMem
 
         if(!this->boot_device.empty())
         {
-            std::string ubi_devices_path = "/sys/class/ubi";
-            std::string found_ubi_device_path = ubi_devices_path + "/" + boot_device;
+            // Extract UBI device number from boot_device (e.g., "ubiblock0_0" -> "0")
+            std::string ubi_num;
+            for (char c : this->boot_device) {
+                if (std::isdigit(c)) {
+                    ubi_num += c;
+                } else if (!ubi_num.empty()) {
+                    break;
+                }
+            }
+
+            if (ubi_num.empty()) {
+                std::cerr << "Cannot extract UBI device number from: " << this->boot_device << std::endl;
+                throw ErrorDeterminePersistentMemory();
+            }
+
+            std::string ubi_dev = "ubi" + ubi_num;
+            fs::path found_ubi_device_path = fs::path("/sys/class/ubi") / ubi_dev;
 
             if(std::filesystem::exists(found_ubi_device_path))
             {
                 try
                 {
-                    std::ifstream count_file((found_ubi_device_path + "/volumes_count"));
-                    int volumes_count = 0;
-                    count_file >> volumes_count;
-                    count_file.close();
-
-                    // Loop through volume IDs and read their names
-                    for (int volume_id = 0; volume_id < volumes_count; ++volume_id)
+                    // Iterate through all ubi0_X directories
+                    for (const auto &entry : fs::directory_iterator(found_ubi_device_path))
                     {
-                        fs::path volume_name_path = volumes_count + "_" + std::to_string(volume_id) + "/name";
+                        std::string dirname = entry.path().filename().string();
 
-                        // Check if the path exists
-                        if (fs::exists(volume_name_path))
+                        // Filter: only ubi0_0, ubi0_1, ubi0_2, etc.
+                        if (dirname.find(ubi_dev + "_") != 0)
                         {
-                            std::ifstream volume_name_file(volume_name_path);
-                            std::string volume_name;
-                            volume_name_file >> volume_name;
-                            volume_name_file.close();
+                            continue;
+                        }
 
-                            //std::cout << "Volume " << volume_id << ": " << volume_name << std::endl;
+                        fs::path name_file = entry.path() / "name";
+                        if (!fs::exists(name_file))
+                        {
+                            continue;
+                        }
 
-                            if (volume_name == label)
-                            {
-                                //std::cout << "Volume '" << label << "' found!" << std::endl;
-                                return volume_name;
-                            }
+                        // Read volume name
+                        std::ifstream name_stream(name_file);
+                        std::string vol_name;
+                        if (!std::getline(name_stream, vol_name))
+                        {
+                            continue;
+                        }
+
+                        // Trim whitespace
+                        auto trim_start = vol_name.find_first_not_of(" \t\n\r");
+                        auto trim_end = vol_name.find_last_not_of(" \t\n\r");
+
+                        if (trim_start != std::string::npos)
+                        {
+                            vol_name = vol_name.substr(trim_start, trim_end - trim_start + 1);
+                        }
+
+                        //std::cout << "Volume " << dirname << ": " << vol_name << std::endl;
+
+                        if (vol_name == label)
+                        {
+                            std::string device = "/dev/" + dirname;
+                            //std::cout << "Found UBI volume '" << label << "': " << device << std::endl;
+                            return device;
                         }
                     }
                 }
