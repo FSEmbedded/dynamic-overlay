@@ -87,6 +87,93 @@ static bool updateMCCBootDevConf(const std::filesystem::path &configPath, const 
     return true;
 }
 
+static bool updateMTDBootDevConf(const std::filesystem::path &configPath, const std::string &mtdDevice)
+{
+    // Prepare temporary file path
+    std::filesystem::path tmpPath = configPath;
+    tmpPath += ".tmp";
+
+    // Open input file for reading
+    std::ifstream inFile(configPath, std::ios::in | std::ios::binary);
+    if (!inFile.is_open())
+    {
+        std::cerr << "Error: Cannot open " << configPath << " for reading\n";
+        return false;
+    }
+
+    // Open temporary output file for writing
+    std::ofstream outFile(tmpPath, std::ios::out | std::ios::trunc | std::ios::binary);
+    if (!outFile.is_open())
+    {
+        std::cerr << "Error: Cannot open " << tmpPath << " for writing\n";
+        return false;
+    }
+
+    // Build replacement pattern for regex_replace
+    const std::string replacement = "$1/dev/" + mtdDevice + "$2";
+    std::string line;
+    // Regex pattern for MTD device entries
+    const std::regex mtdDeviceRegex(
+        R"((device=)?/dev/mtd\d+(p\d+)?)",
+        std::regex::optimize);
+
+    // Process file line by line
+    while (std::getline(inFile, line))
+    {
+        // Replace all occurrences in the line
+        std::string newLine = std::regex_replace(line, mtdDeviceRegex, replacement);
+        outFile << newLine << '\n';
+    }
+
+    inFile.close();
+    outFile.close();
+
+    // Atomically replace original file
+    std::error_code ec;
+    std::filesystem::rename(tmpPath, configPath, ec);
+    if (ec)
+    {
+        std::cerr << "Error renaming temp file: " << ec.message() << "\n";
+        return false;
+    }
+    // write file to disk
+    ::sync();
+    // Remove the temporary file
+    std::filesystem::remove(tmpPath, ec);
+
+    return true;
+}
+
+/**
+ * Finds the MTD device corresponding to the given name by parsing /proc/mtd
+ * @param name The name of the MTD device to find (e.g., "UBootEnv")
+ * @return The MTD device identifier (e.g., "mtd0")
+ */
+static std::string findMTDDeviceByName(const std::string &name)
+{
+    std::ifstream mtdFile("/proc/mtd");
+    if (!mtdFile.is_open())
+    {
+        std::cerr << "Error: Cannot open /proc/mtd for reading\n";
+        return "";
+    }
+
+    std::string line;
+    std::regex mtdRegex(R"(^(mtd\d+): .+ \"(.+)\"$)");
+    while (std::getline(mtdFile, line))
+    {
+        std::smatch match;
+        if (std::regex_search(line, match, mtdRegex))
+        {
+            if (match.size() == 3 && match[2] == name)
+            {
+                return match[1];
+            }
+        }
+    }
+    return "";
+}
+
 void create_link::create_link_to_system_conf(const PersistentMemDetector::MemType &type, const std::string &boot_device)
 {
     std::filesystem::path source, destination;
@@ -110,7 +197,7 @@ void create_link::create_link_to_system_conf(const PersistentMemDetector::MemTyp
                 // Update the system.conf file with the detected boot device
                 updateMCCBootDevConf(destination, boot_device);
             }
-        }
+            // TODO: changes in mtd layout must be suitable to system.conf
     }
     catch (...)
     {
@@ -145,6 +232,13 @@ void create_link::create_link_to_fw_env_conf(const PersistentMemDetector::MemTyp
             {
                 // Update the fw_env.conf file with the detected boot device
                 updateMCCBootDevConf(destination, boot_device);
+            }
+        } else if (type == PersistentMemDetector::MemType::NAND)
+        {
+            const std::string mtdDevice = findMTDDeviceByName("UBootEnv");
+            if (!mtdDevice.empty() && !isBootDeviceConfigured(destination, mtdDevice))
+            {
+                updateMTDBootDevConf(destination, mtdDevice);
             }
         }
     }
