@@ -198,6 +198,7 @@ void create_link::create_link_to_system_conf(const PersistentMemDetector::MemTyp
                 updateMCCBootDevConf(destination, boot_device);
             }
             // TODO: changes in mtd layout must be suitable to system.conf
+        }
     }
     catch (...)
     {
