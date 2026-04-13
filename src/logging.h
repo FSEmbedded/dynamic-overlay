@@ -1,117 +1,100 @@
-/**
- * @file logging.h
- * @brief Conditional logging macros for dynamic_overlay
- *
- * Provides compile-time configurable logging macros that can be disabled
- * to reduce binary size and improve startup time in production builds.
- *
- * @section Usage
- *
- * Enable logging by defining ENABLE_LOGGING before including this header
- * or via compiler flag: -DENABLE_LOGGING
- *
- * @code
- * #define ENABLE_LOGGING
- * #include "logging.h"
- *
- * LOG_INFO("Application started");
- * LOG_DEBUG("Processing entry: " << entry);
- * LOG_WARNING("File not found: " << path);
- * LOG_ERROR("Mount failed: " << strerror(errno));
- * @endcode
- *
- * @section Levels
- *
- * - LOG_DEBUG   - Detailed debugging information (disabled in release)
- * - LOG_INFO    - General informational messages
- * - LOG_WARNING - Warning conditions
- * - LOG_ERROR   - Error conditions
- *
- * @note All logging outputs to std::cerr with "dynamicoverlay: " prefix
- */
+#pragma once
 
-#ifndef DYNAMIC_OVERLAY_LOGGING_H
-#define DYNAMIC_OVERLAY_LOGGING_H
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <string_view>
 
-#include <iostream>
+extern "C" {
+#include <fcntl.h>
+#include <unistd.h>
+}
 
-/**
- * @def ENABLE_LOGGING
- * @brief Master switch to enable/disable all logging
- *
- * Define this macro before including logging.h or pass -DENABLE_LOGGING
- * to the compiler to enable logging output.
- */
+namespace logging {
 
-/**
- * @def ENABLE_DEBUG_LOGGING
- * @brief Enable verbose debug logging
- *
- * Only effective when ENABLE_LOGGING is also defined.
- * Use for development and debugging only.
- */
+enum class Level : uint8_t {
+    fatal,
+    error,
+    warning,
+    info,
+    debug
+};
+
+inline constexpr std::string_view level_tag(Level lvl) noexcept
+{
+    switch (lvl) {
+    case Level::fatal:   return "FATAL: ";
+    case Level::error:   return "ERROR: ";
+    case Level::warning: return "WARNING: ";
+    case Level::info:    return "INFO: ";
+    case Level::debug:   return "DEBUG: ";
+    }
+    return "";
+}
+
+inline constexpr std::string_view prefix() noexcept
+{
+    return "dynamicoverlay: ";
+}
 
 #ifdef ENABLE_LOGGING
 
-    /**
-     * @def LOG_PREFIX
-     * @brief Prefix for all log messages
-     */
-    #define LOG_PREFIX "dynamicoverlay: "
+inline void log_write(Level lvl, std::string_view msg) noexcept
+{
+    std::string buf;
+    buf.reserve(prefix().size() + level_tag(lvl).size() + msg.size() + 1);
+    buf.append(prefix());
+    buf.append(level_tag(lvl));
+    buf.append(msg);
+    buf.push_back('\n');
 
-    /**
-     * @def LOG_ERROR(msg)
-     * @brief Log an error message
-     * @param msg Message to log (can use stream operators)
-     */
-    #define LOG_ERROR(msg) \
-        std::cerr << LOG_PREFIX << "ERROR: " << msg << std::endl
-
-    /**
-     * @def LOG_WARNING(msg)
-     * @brief Log a warning message
-     * @param msg Message to log (can use stream operators)
-     */
-    #define LOG_WARNING(msg) \
-        std::cerr << LOG_PREFIX << "WARNING: " << msg << std::endl
-
-    /**
-     * @def LOG_INFO(msg)
-     * @brief Log an informational message
-     * @param msg Message to log (can use stream operators)
-     */
-    #define LOG_INFO(msg) \
-        std::cerr << LOG_PREFIX << "INFO: " << msg << std::endl
-
-    #ifdef ENABLE_DEBUG_LOGGING
-        /**
-         * @def LOG_DEBUG(msg)
-         * @brief Log a debug message (only when ENABLE_DEBUG_LOGGING is defined)
-         * @param msg Message to log (can use stream operators)
-         */
-        #define LOG_DEBUG(msg) \
-            std::cerr << LOG_PREFIX << "DEBUG: " << msg << std::endl
-    #else
-        #define LOG_DEBUG(msg) ((void)0)
-    #endif
-
+#ifdef LOG_BACKEND_KMSG
+    // /dev/kmsg backend for preinit (before syslog/journald)
+    const int fd = ::open("/dev/kmsg", O_WRONLY | O_NOCTTY);
+    if (fd >= 0) {
+        if (::write(fd, buf.data(), buf.size()) == -1) { /* ignore */ }
+        ::close(fd);
+    } else {
+        // Fallback to stderr if kmsg unavailable
+        if (::write(STDERR_FILENO, buf.data(), buf.size()) == -1) { /* ignore */ }
+    }
 #else
-    /* Logging disabled - all macros expand to nothing */
-    #define LOG_ERROR(msg)   ((void)0)
-    #define LOG_WARNING(msg) ((void)0)
-    #define LOG_INFO(msg)    ((void)0)
-    #define LOG_DEBUG(msg)   ((void)0)
+    if (::write(STDERR_FILENO, buf.data(), buf.size()) == -1) { /* ignore */ }
+#endif
+}
+
+inline void log_write_errno(Level lvl, std::string_view msg, int errnum) noexcept
+{
+    const char *errstr = std::strerror(errnum);
+    std::string full;
+    full.reserve(msg.size() + 2 + std::strlen(errstr));
+    full.append(msg);
+    full.append(": ");
+    full.append(errstr);
+    log_write(lvl, full);
+}
+
+#define LOG_FATAL(msg) ::logging::log_write(::logging::Level::fatal, msg)
+#define LOG_ERROR(msg) ::logging::log_write(::logging::Level::error, msg)
+#define LOG_WARNING(msg) ::logging::log_write(::logging::Level::warning, msg)
+#define LOG_INFO(msg) ::logging::log_write(::logging::Level::info, msg)
+
+#define LOG_ERRNO(msg, errnum) ::logging::log_write_errno(::logging::Level::error, msg, errnum)
+
+#ifdef ENABLE_DEBUG_LOGGING
+    #define LOG_DEBUG(msg) ::logging::log_write(::logging::Level::debug, msg)
+#else
+    #define LOG_DEBUG(msg) ((void)0)
 #endif
 
-/**
- * @def LOG_ERRNO(msg)
- * @brief Log an error message with errno description
- * @param msg Message prefix (can use stream operators)
- *
- * Automatically appends ": <errno description>" to the message.
- * Always enabled regardless of ENABLE_LOGGING.
- */
-#define LOG_ERRNO(msg) \
-    std::cerr << "dynamicoverlay: " << msg << ": " << strerror(errno) << std::endl
+#else
+    // Logging disabled — all macros compile out to nothing
+    #define LOG_FATAL(msg)        ((void)0)
+    #define LOG_ERROR(msg)        ((void)0)
+    #define LOG_WARNING(msg)      ((void)0)
+    #define LOG_INFO(msg)         ((void)0)
+    #define LOG_DEBUG(msg)        ((void)0)
+    #define LOG_ERRNO(msg, errnum) ((void)0)
+#endif
 
-#endif /* DYNAMIC_OVERLAY_LOGGING_H */
+} // namespace logging
