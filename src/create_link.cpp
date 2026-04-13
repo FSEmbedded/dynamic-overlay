@@ -1,317 +1,372 @@
 #include "create_link.h"
-#include <stdexcept>
-#include <iostream>
-#include <fstream>
+#include "config.h"
+#include "posix_utils.h"
+#include "logging.h"
+
+#include <cstring>
 #include <string>
-#include <regex>
+#include <string_view>
+
+extern "C" {
 #include <unistd.h>
-
-namespace create_link
-{
-    // Default paths for U-Boot environment and RAUC system configuration
-    constexpr const char *DEFAULT_UBOOT_ENV_PATH = "/rw_fs/root/conf/fw_env.config";
-    constexpr const char *DEFAULT_RAUC_SYSTEM_CONF_PATH = "/rw_fs/root/conf/system.conf";
 }
 
-#ifndef UBOOT_ENV_PATH
-#define UBOOT_ENV_PATH "/rw_fs/root/conf/fw_env.config"
-#endif
+namespace {
 
-#ifndef RAUC_SYSTEM_CONF_PATH
-#define RAUC_SYSTEM_CONF_PATH "/rw_fs/root/conf/system.conf"
-#endif
-
-
-
-// Precompiled regex pattern for device entries (optimized)
-inline const std::regex deviceRegex(
-    R"((device=)?/dev/mmcblk\d+(p\d+|boot\d+))",
-    std::regex::optimize);
-
-/**
- * Updates the RAUC system.conf or fw_env.conf files with the detected boot device
- * @param configPath Path to the system.conf file
- * @param bootDevice The detected boot device (e.g., "mmcblk0", "mmcblk1", etc.)
- * @return True if the update was successful, false otherwise
- */
-static bool updateMCCBootDevConf(const std::filesystem::path &configPath, const std::string &bootDevice)
+// Replace /dev/mmcblkN(pN|bootN) with /dev/<bootDevice>(pN|bootN) in a line
+std::string replace_mmc_device(std::string_view line, std::string_view boot_device) noexcept
 {
-    // Prepare temporary file path
-    std::filesystem::path tmpPath = configPath;
-    tmpPath += ".tmp";
+    std::string result;
+    result.reserve(line.size());
 
-    // Open input file for reading
-    std::ifstream inFile(configPath, std::ios::in | std::ios::binary);
-    if (!inFile.is_open())
-    {
-        std::cerr << "Error: Cannot open " << configPath << " for reading\n";
-        return false;
-    }
-
-    // Open temporary output file for writing
-    std::ofstream outFile(tmpPath, std::ios::out | std::ios::trunc | std::ios::binary);
-    if (!outFile.is_open())
-    {
-        std::cerr << "Error: Cannot open " << tmpPath << " for writing\n";
-        return false;
-    }
-
-    // Build replacement pattern for regex_replace
-    const std::string replacement = "$1/dev/" + bootDevice + "$2";
-    std::string line;
-
-    // Process file line by line
-    while (std::getline(inFile, line))
-    {
-        // Replace all occurrences in the line
-        std::string newLine = std::regex_replace(line, deviceRegex, replacement);
-        outFile << newLine << '\n';
-    }
-
-    inFile.close();
-    outFile.close();
-
-    // Atomically replace original file
-    std::error_code ec;
-    std::filesystem::rename(tmpPath, configPath, ec);
-    if (ec)
-    {
-        std::cerr << "Error renaming temp file: " << ec.message() << "\n";
-        return false;
-    }
-    // write file to disk
-    ::sync();
-    // Remove the temporary file
-    std::filesystem::remove(tmpPath, ec);
-
-    return true;
-}
-
-static bool updateMTDBootDevConf(const std::filesystem::path &configPath, const std::string &mtdDevice)
-{
-    // Prepare temporary file path
-    std::filesystem::path tmpPath = configPath;
-    tmpPath += ".tmp";
-
-    // Open input file for reading
-    std::ifstream inFile(configPath, std::ios::in | std::ios::binary);
-    if (!inFile.is_open())
-    {
-        std::cerr << "Error: Cannot open " << configPath << " for reading\n";
-        return false;
-    }
-
-    // Open temporary output file for writing
-    std::ofstream outFile(tmpPath, std::ios::out | std::ios::trunc | std::ios::binary);
-    if (!outFile.is_open())
-    {
-        std::cerr << "Error: Cannot open " << tmpPath << " for writing\n";
-        return false;
-    }
-
-    // Build replacement pattern for regex_replace
-    const std::string replacement = "$1/dev/" + mtdDevice + "$2";
-    std::string line;
-    // Regex pattern for MTD device entries
-    const std::regex mtdDeviceRegex(
-        R"((device=)?/dev/mtd\d+(p\d+)?)",
-        std::regex::optimize);
-
-    // Process file line by line
-    while (std::getline(inFile, line))
-    {
-        // Replace all occurrences in the line
-        std::string newLine = std::regex_replace(line, mtdDeviceRegex, replacement);
-        outFile << newLine << '\n';
-    }
-
-    inFile.close();
-    outFile.close();
-
-    // Atomically replace original file
-    std::error_code ec;
-    std::filesystem::rename(tmpPath, configPath, ec);
-    if (ec)
-    {
-        std::cerr << "Error renaming temp file: " << ec.message() << "\n";
-        return false;
-    }
-    // write file to disk
-    ::sync();
-    // Remove the temporary file
-    std::filesystem::remove(tmpPath, ec);
-
-    return true;
-}
-
-/**
- * Finds the MTD device corresponding to the given name by parsing /proc/mtd
- * @param name The name of the MTD device to find (e.g., "UBootEnv")
- * @return The MTD device identifier (e.g., "mtd0")
- */
-static std::string findMTDDeviceByName(const std::string &name)
-{
-    std::ifstream mtdFile("/proc/mtd");
-    if (!mtdFile.is_open())
-    {
-        std::cerr << "Error: Cannot open /proc/mtd for reading\n";
-        return "";
-    }
-
-    std::string line;
-    std::regex mtdRegex(R"(^(mtd\d+): .+ \"(.+)\"$)");
-    while (std::getline(mtdFile, line))
-    {
-        std::smatch match;
-        if (std::regex_search(line, match, mtdRegex))
-        {
-            if (match.size() == 3 && match[2] == name)
-            {
-                return match[1];
-            }
-        }
-    }
-    return "";
-}
-
-void create_link::create_link_to_system_conf(const PersistentMemDetector::MemType &type, const std::string &boot_device)
-{
-    std::filesystem::path source, destination;
-
-    source = get_system_conf(type);
-    destination = std::filesystem::path(RAUC_SYSTEM_CONF_PATH);
-
-    try
-    {
-        // copy file if not already present
-        if (!std::filesystem::exists(destination))
-        {
-            std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing);
-        }
-        // check if the destination directory exists
-        // TODO: MTD devices...
-        if (type == PersistentMemDetector::MemType::eMMC)
-        {
-            if(!isBootDeviceConfigured(destination, boot_device))
-            {
-                // Update the system.conf file with the detected boot device
-                updateMCCBootDevConf(destination, boot_device);
-            }
-            // TODO: changes in mtd layout must be suitable to system.conf
-        }
-    }
-    catch (...)
-    {
-        create_link::CreateSymlink(source, destination);
-    }
-}
-
-void create_link::create_link_to_fw_env_conf(const PersistentMemDetector::MemType &type, const std::string &boot_device)
-{
-    std::filesystem::path source, destination;
-
-    source = get_fw_env_config(type);
-    destination = std::filesystem::path(UBOOT_ENV_PATH);
-
-    try
-    {
-        // check if the destination directory exists
-        if (!std::filesystem::exists(destination.parent_path()))
-        {
-            std::filesystem::create_directories(destination.parent_path());
-        }
-        // copy file if not already present
-        if (!std::filesystem::exists(destination))
-        {
-            std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing);
-        }
-        // Check if the destination is a symlink
-        // TODO: MTD devices...
-        if (type == PersistentMemDetector::MemType::eMMC)
-        {
-            if(!isBootDeviceConfigured(destination, boot_device))
-            {
-                // Update the fw_env.conf file with the detected boot device
-                updateMCCBootDevConf(destination, boot_device);
-            }
-        } else if (type == PersistentMemDetector::MemType::NAND)
-        {
-            const std::string mtdDevice = findMTDDeviceByName("UBootEnv");
-            if (!mtdDevice.empty() && !isBootDeviceConfigured(destination, mtdDevice))
-            {
-                updateMTDBootDevConf(destination, mtdDevice);
-            }
-        }
-    }
-    catch (...)
-    {
-        create_link::CreateSymlink(source, destination);
-    }
-}
-
-std::filesystem::path create_link::get_fw_env_config(const PersistentMemDetector::MemType &mem_type)
-{
-    if (mem_type == PersistentMemDetector::MemType::NAND)
-    {
-        return std::filesystem::path(NAND_UBOOT_ENV_PATH);
-    }
-    else if (mem_type == PersistentMemDetector::MemType::eMMC)
-    {
-        return std::filesystem::path(EMMC_UBOOT_ENV_PATH);
-    }
-    else
-    {
-        throw(std::logic_error("Memory type is not defined"));
-    }
-}
-
-std::filesystem::path create_link::get_system_conf(const PersistentMemDetector::MemType &mem_type)
-{
-    if (mem_type == PersistentMemDetector::MemType::NAND)
-    {
-        return std::filesystem::path(NAND_RAUC_SYSTEM_CONF_PATH);
-    }
-    else if (mem_type == PersistentMemDetector::MemType::eMMC)
-    {
-        return std::filesystem::path(EMMC_RAUC_SYSTEM_CONF_PATH);
-    }
-    else
-    {
-        throw(std::logic_error("Memory type is not defined"));
-    }
-}
-
-bool create_link::isBootDeviceConfigured(const std::filesystem::path& config_path,
-                                       const std::string& expected_boot_device)
-{
-    try
-    {
-        std::ifstream file(config_path, std::ios::in | std::ios::binary);
-        if (!file.is_open())
-        {
-            return false;
+    std::string_view remaining = line;
+    while (!remaining.empty()) {
+        // Look for /dev/mmcblk
+        const auto pos = remaining.find("/dev/mmcblk");
+        if (pos == std::string_view::npos) {
+            result.append(remaining);
+            break;
         }
 
-        std::string line;
-        const std::string expected_device_path = "/dev/" + expected_boot_device;
+        result.append(remaining.substr(0, pos));
+        remaining.remove_prefix(pos);
 
-        while (std::getline(file, line))
-        {
-            // Search for lines that contain device paths
-            if (line.find("/dev/") != std::string::npos)
-            {
-                // Check if the line contains the expected boot device path
-                if (line.find(expected_device_path) != std::string::npos)
-                {
-                    return true;
+        // Find end of device name: /dev/mmcblkN followed optionally by pN or bootN
+        auto end = std::string_view("/dev/mmcblk").size();
+        // Skip digits after mmcblk
+        while (end < remaining.size() && remaining[end] >= '0' && remaining[end] <= '9') {
+            ++end;
+        }
+        // Check for pN or bootN suffix
+        if (end < remaining.size() && (remaining[end] == 'p' ||
+            (remaining.size() - end >= 4 && remaining.compare(end, 4, "boot") == 0))) {
+            if (remaining[end] == 'p') {
+                ++end;
+                while (end < remaining.size() && remaining[end] >= '0' && remaining[end] <= '9') {
+                    ++end;
+                }
+            } else {
+                end += 4; // "boot"
+                while (end < remaining.size() && remaining[end] >= '0' && remaining[end] <= '9') {
+                    ++end;
                 }
             }
         }
+
+        // Extract the suffix after mmcblkN (pN or bootN)
+        const auto dev_prefix_end = std::string_view("/dev/mmcblk").size();
+        auto digit_end = dev_prefix_end;
+        while (digit_end < end && remaining[digit_end] >= '0' && remaining[digit_end] <= '9') {
+            ++digit_end;
+        }
+        const auto suffix = remaining.substr(digit_end, end - digit_end);
+
+        result.append("/dev/");
+        result.append(boot_device);
+        result.append(suffix);
+        remaining.remove_prefix(end);
+    }
+
+    return result;
+}
+
+// Replace /dev/mtdN(pN)? with /dev/<mtdDevice>(pN)? in a line
+std::string replace_mtd_device(std::string_view line, std::string_view mtd_device) noexcept
+{
+    std::string result;
+    result.reserve(line.size());
+
+    std::string_view remaining = line;
+    while (!remaining.empty()) {
+        const auto pos = remaining.find("/dev/mtd");
+        if (pos == std::string_view::npos) {
+            result.append(remaining);
+            break;
+        }
+
+        result.append(remaining.substr(0, pos));
+        remaining.remove_prefix(pos);
+
+        auto end = std::string_view("/dev/mtd").size();
+        // Skip digits
+        while (end < remaining.size() && remaining[end] >= '0' && remaining[end] <= '9') {
+            ++end;
+        }
+        // Optional pN suffix
+        if (end < remaining.size() && remaining[end] == 'p') {
+            ++end;
+            while (end < remaining.size() && remaining[end] >= '0' && remaining[end] <= '9') {
+                ++end;
+            }
+        }
+
+        result.append("/dev/");
+        result.append(mtd_device);
+        remaining.remove_prefix(end);
+    }
+
+    return result;
+}
+
+[[nodiscard]] Error update_mcc_boot_dev_conf(std::string_view config_path,
+                                              std::string_view boot_device) noexcept
+{
+    std::string content;
+    Error err = posix_utils::read_file_to_string(config_path, content);
+    if (err != Error::none) {
+        return err;
+    }
+
+    std::string output;
+    output.reserve(content.size());
+
+    std::string_view remaining(content);
+    while (!remaining.empty()) {
+        const auto nl = remaining.find('\n');
+        std::string_view line;
+        if (nl != std::string_view::npos) {
+            line = remaining.substr(0, nl);
+            remaining.remove_prefix(nl + 1);
+        } else {
+            line = remaining;
+            remaining = {};
+        }
+
+        output.append(replace_mmc_device(line, boot_device));
+        output.push_back('\n');
+    }
+
+    const std::string tmp_path = std::string(config_path) + ".tmp";
+    err = posix_utils::write_string_to_file(tmp_path, output);
+    if (err != Error::none) {
+        return err;
+    }
+
+    err = posix_utils::rename_file(tmp_path, config_path);
+    if (err != Error::none) {
+        static_cast<void>(posix_utils::remove_file(tmp_path));
+        return err;
+    }
+
+    ::sync();
+    return Error::none;
+}
+
+[[nodiscard]] Error update_mtd_boot_dev_conf(std::string_view config_path,
+                                              std::string_view mtd_device) noexcept
+{
+    std::string content;
+    Error err = posix_utils::read_file_to_string(config_path, content);
+    if (err != Error::none) {
+        return err;
+    }
+
+    std::string output;
+    output.reserve(content.size());
+
+    std::string_view remaining(content);
+    while (!remaining.empty()) {
+        const auto nl = remaining.find('\n');
+        std::string_view line;
+        if (nl != std::string_view::npos) {
+            line = remaining.substr(0, nl);
+            remaining.remove_prefix(nl + 1);
+        } else {
+            line = remaining;
+            remaining = {};
+        }
+
+        output.append(replace_mtd_device(line, mtd_device));
+        output.push_back('\n');
+    }
+
+    const std::string tmp_path = std::string(config_path) + ".tmp";
+    err = posix_utils::write_string_to_file(tmp_path, output);
+    if (err != Error::none) {
+        return err;
+    }
+
+    err = posix_utils::rename_file(tmp_path, config_path);
+    if (err != Error::none) {
+        static_cast<void>(posix_utils::remove_file(tmp_path));
+        return err;
+    }
+
+    ::sync();
+    return Error::none;
+}
+
+// Parse /proc/mtd to find the MTD device by name
+std::string find_mtd_device_by_name(std::string_view name) noexcept
+{
+    std::string mtd_content;
+    if (posix_utils::read_file_to_string("/proc/mtd", mtd_content) != Error::none) {
+        return {};
+    }
+
+    // Parse line by line: "mtdN: XXXXXXXX YYYYYYYY \"name\""
+    std::string_view remaining(mtd_content);
+    while (!remaining.empty()) {
+        const auto nl = remaining.find('\n');
+        std::string_view line;
+        if (nl != std::string_view::npos) {
+            line = remaining.substr(0, nl);
+            remaining.remove_prefix(nl + 1);
+        } else {
+            line = remaining;
+            remaining = {};
+        }
+
+        // Find quoted name at end of line
+        const auto quote_end = line.rfind('"');
+        if (quote_end == std::string_view::npos) continue;
+
+        const auto quote_start = line.rfind('"', quote_end - 1);
+        if (quote_start == std::string_view::npos) continue;
+
+        const auto vol_name = line.substr(quote_start + 1, quote_end - quote_start - 1);
+        if (vol_name != name) continue;
+
+        // Extract mtdN from beginning of line
+        const auto colon = line.find(':');
+        if (colon == std::string_view::npos) continue;
+
+        return std::string(line.substr(0, colon));
+    }
+
+    return {};
+}
+
+// Extract parent directory from path string
+std::string parent_path(std::string_view path) noexcept
+{
+    const auto pos = path.rfind('/');
+    if (pos == std::string_view::npos || pos == 0) {
+        return "/";
+    }
+    return std::string(path.substr(0, pos));
+}
+
+} // anonymous namespace
+
+std::string_view create_link::get_fw_env_config(PersistentMemDetector::MemType mem_type) noexcept
+{
+    if (mem_type == PersistentMemDetector::MemType::NAND) {
+        return config::nand_uboot_env_path;
+    }
+    if (mem_type == PersistentMemDetector::MemType::eMMC) {
+        return config::emmc_uboot_env_path;
+    }
+    return {};
+}
+
+std::string_view create_link::get_system_conf(PersistentMemDetector::MemType mem_type) noexcept
+{
+    if (mem_type == PersistentMemDetector::MemType::NAND) {
+        return config::nand_rauc_system_conf_path;
+    }
+    if (mem_type == PersistentMemDetector::MemType::eMMC) {
+        return config::emmc_rauc_system_conf_path;
+    }
+    return {};
+}
+
+Error create_link::create_link_to_system_conf(PersistentMemDetector::MemType type,
+                                               std::string_view boot_device) noexcept
+{
+    const auto source = get_system_conf(type);
+    if (source.empty()) {
+        LOG_ERROR("memory type not defined for system.conf");
+        return Error::invalid_argument;
+    }
+
+    const std::string destination(config::rauc_system_conf_path);
+
+    if (!posix_utils::path_exists(destination)) {
+        const Error err = posix_utils::copy_file(source, destination);
+        if (err != Error::none) {
+            LOG_ERROR("failed to copy system.conf");
+            return err;
+        }
+    }
+
+    if (type == PersistentMemDetector::MemType::eMMC) {
+        if (!isBootDeviceConfigured(destination, boot_device)) {
+            return update_mcc_boot_dev_conf(destination, boot_device);
+        }
+    }
+
+    return Error::none;
+}
+
+Error create_link::create_link_to_fw_env_conf(PersistentMemDetector::MemType type,
+                                               std::string_view boot_device) noexcept
+{
+    const auto source = get_fw_env_config(type);
+    if (source.empty()) {
+        LOG_ERROR("memory type not defined for fw_env.config");
+        return Error::invalid_argument;
+    }
+
+    const std::string destination(config::uboot_env_path);
+    const auto parent = parent_path(destination);
+
+    if (!posix_utils::path_exists(parent)) {
+        const Error err = posix_utils::mkdir_p(parent);
+        if (err != Error::none) {
+            return err;
+        }
+    }
+
+    if (!posix_utils::path_exists(destination)) {
+        const Error err = posix_utils::copy_file(source, destination);
+        if (err != Error::none) {
+            LOG_ERROR("failed to copy fw_env.config");
+            return err;
+        }
+    }
+
+    if (type == PersistentMemDetector::MemType::eMMC) {
+        if (!isBootDeviceConfigured(destination, boot_device)) {
+            return update_mcc_boot_dev_conf(destination, boot_device);
+        }
+    } else if (type == PersistentMemDetector::MemType::NAND) {
+        const std::string mtd_device = find_mtd_device_by_name("UBootEnv");
+        if (!mtd_device.empty() && !isBootDeviceConfigured(destination, mtd_device)) {
+            return update_mtd_boot_dev_conf(destination, mtd_device);
+        }
+    }
+
+    return Error::none;
+}
+
+bool create_link::isBootDeviceConfigured(std::string_view config_path,
+                                          std::string_view expected_boot_device) noexcept
+{
+    std::string content;
+    if (posix_utils::read_file_to_string(config_path, content) != Error::none) {
         return false;
     }
-    catch (...)
-    {
-        // If any error occurs (e.g., file not found, read error), assume the device is not configured
-        return false;
+
+    const std::string expected_device_path = "/dev/" + std::string(expected_boot_device);
+
+    std::string_view remaining(content);
+    while (!remaining.empty()) {
+        const auto nl = remaining.find('\n');
+        std::string_view line;
+        if (nl != std::string_view::npos) {
+            line = remaining.substr(0, nl);
+            remaining.remove_prefix(nl + 1);
+        } else {
+            line = remaining;
+            remaining = {};
+        }
+
+        if (line.find("/dev/") != std::string_view::npos &&
+            line.find(expected_device_path) != std::string_view::npos) {
+            return true;
+        }
     }
+
+    return false;
 }
