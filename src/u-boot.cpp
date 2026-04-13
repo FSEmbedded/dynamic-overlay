@@ -1,131 +1,129 @@
 #include "u-boot.h"
-#include <cerrno>
-#include <climits>
-#include <cstdlib>
+#include "logging.h"
+
 #include <algorithm>
+#include <charconv>
+#include <cstdlib>
+#include <cstring>
 
-UBoot::UBoot(const std::string & path):
-    fw_env_config_path(path)
+UBoot::UBoot(std::string_view path) noexcept
+    : fw_env_config_path_(path)
 {
-
 }
 
-UBoot::~UBoot()
+Error UBoot::get_raw_variable(std::string_view name, std::string &out) const noexcept
 {
+    UBootCtxGuard ctx;
 
+    Error err = ctx.init();
+    if (err != Error::none) {
+        LOG_ERROR("libuboot init failed");
+        return err;
+    }
+
+    err = ctx.read_config(fw_env_config_path_);
+    if (err != Error::none) {
+        LOG_ERROR("reading " + fw_env_config_path_ + " failed");
+        return err;
+    }
+
+    err = ctx.open_env();
+    if (err != Error::none) {
+        LOG_ERROR("opening U-Boot env failed");
+        return err;
+    }
+
+    const std::string var_name(name);
+    const char *ptr_var = libuboot_get_env(ctx.get(), var_name.c_str());
+    if (ptr_var == nullptr) {
+        LOG_ERROR("U-Boot variable not found: " + var_name);
+        return Error::uboot_var_not_found;
+    }
+
+    out = std::string(ptr_var);
+    std::free(const_cast<char *>(ptr_var));
+
+    return Error::none;
 }
 
-std::string UBoot::getVariable(const std::string &variableName) const
+Error UBoot::getVariable(std::string_view name, std::string &out) const noexcept
 {
-    struct uboot_ctx *ctx;
-
-    if (libuboot_initialize(&ctx, NULL) < 0)
-    {
-        throw(UBootEnv("Init libuboot failed"));
-    }
-
-    if (libuboot_read_config(ctx, this->fw_env_config_path.c_str()) < 0)
-    {
-        libuboot_exit(ctx);
-        throw(UBootEnv(std::string("Reading ") + this->fw_env_config_path + std::string(" failed")));
-    }
-
-    if (libuboot_open(ctx) < 0)
-    {
-        libuboot_exit(ctx);
-        throw(UBootEnv("Opening of ENV failed"));
-    }
-
-    const char *ptr_var = libuboot_get_env(ctx, variableName.c_str());
-    if (ptr_var == NULL)
-    {
-        libuboot_close(ctx);
-        libuboot_exit(ctx);
-        throw(UBootEnvAccess(variableName));
-    }
-
-    std::string returnValue(ptr_var);
-    free((void *)ptr_var);
-
-    libuboot_close(ctx);
-    libuboot_exit(ctx);
-    return returnValue;
+    return get_raw_variable(name, out);
 }
 
-uint8_t UBoot::getVariable(const std::string &variable_name, const std::vector<uint8_t> &allowed_list)
+Error UBoot::getVariable(std::string_view name,
+                          const std::vector<uint8_t> &allowed,
+                          uint8_t &out) const noexcept
 {
-    const std::string content = this->getVariable(variable_name);
-    unsigned long number;
-    try
-    {
-        number = std::stoul(content);
-    }
-    catch(...)
-    {
-        throw(UBootEnvVarCanNotConvertedIntoReturnType("Variable content can not be converted into a unsigned long"));
+    std::string content;
+    const Error err = get_raw_variable(name, content);
+    if (err != Error::none) {
+        return err;
     }
 
-    uint8_t return_value;
-    if(number <= UCHAR_MAX)
-    {
-        return_value = uint8_t(number);
-    }
-    else
-    {
-        throw(UBootEnvVarCanNotConvertedIntoReturnType("Variable fit not in type u_int8"));
-    }
+    unsigned long number = 0;
+    const auto *begin = content.data();
+    const auto *end = content.data() + content.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, number);
 
-    if(std::find(allowed_list.begin(), allowed_list.end(), return_value) == allowed_list.end())
-    {
-        std::string allowed_list_ser;
-        for(const auto & elem : allowed_list)
-        {
-            allowed_list_ser += std::to_string(elem) + std::string(" ");
-        }
-
-        throw(UBootEnvVarNotAllowedContent(std::to_string(return_value), allowed_list_ser));
+    if (ec != std::errc{} || ptr != end) {
+        LOG_ERROR("variable cannot be converted to uint8: " + content);
+        return Error::uboot_var_invalid;
     }
 
-    return return_value;
+    if (number > 255) {
+        LOG_ERROR("variable value out of uint8 range: " + content);
+        return Error::uboot_var_invalid;
+    }
+
+    out = static_cast<uint8_t>(number);
+
+    if (std::find(allowed.begin(), allowed.end(), out) == allowed.end()) {
+        LOG_ERROR("variable value not in allowed list: " + content);
+        return Error::uboot_var_invalid;
+    }
+
+    return Error::none;
 }
 
-std::string UBoot::getVariable(const std::string &variable_name, const std::vector<std::string> &allowed_list)
+Error UBoot::getVariable(std::string_view name,
+                          const std::vector<std::string> &allowed,
+                          std::string &out) const noexcept
 {
-    const std::string return_value = this->getVariable(variable_name);
-    if(std::find(allowed_list.begin(), allowed_list.end(), return_value) == allowed_list.end())
-    {
-        std::string allowed_list_ser;
-        for(const auto & elem : allowed_list)
-        {
-            allowed_list_ser += elem + std::string(" ");
-        }
-
-        throw(UBootEnvVarNotAllowedContent(return_value, allowed_list_ser));
+    const Error err = get_raw_variable(name, out);
+    if (err != Error::none) {
+        return err;
     }
-    return return_value;
+
+    if (std::find(allowed.begin(), allowed.end(), out) == allowed.end()) {
+        LOG_ERROR("variable value not in allowed list: " + out);
+        return Error::uboot_var_invalid;
+    }
+
+    return Error::none;
 }
 
-char UBoot::getVariable(const std::string &variable_name, const std::vector<char> &allowed_list)
+Error UBoot::getVariable(std::string_view name,
+                          const std::vector<char> &allowed,
+                          char &out) const noexcept
 {
-    const std::string content = this->getVariable(variable_name);
-
-    if(content.size() != 1)
-    {
-        throw(UBootEnvVarCanNotConvertedIntoReturnType("Variable fit not in type char"));
+    std::string content;
+    const Error err = get_raw_variable(name, content);
+    if (err != Error::none) {
+        return err;
     }
 
-    const char return_value = content.at(0);
-
-    if(std::find(allowed_list.begin(), allowed_list.end(), return_value) == allowed_list.end())
-    {
-        std::string allowed_list_ser;
-        for(const auto & elem : allowed_list)
-        {
-            allowed_list_ser += elem + std::string(" ");
-        }
-
-        throw(UBootEnvVarNotAllowedContent(std::to_string(return_value), allowed_list_ser));
+    if (content.size() != 1) {
+        LOG_ERROR("variable cannot be converted to char: " + content);
+        return Error::uboot_var_invalid;
     }
 
-    return return_value;
+    out = content[0];
+
+    if (std::find(allowed.begin(), allowed.end(), out) == allowed.end()) {
+        LOG_ERROR("variable value not in allowed list: " + content);
+        return Error::uboot_var_invalid;
+    }
+
+    return Error::none;
 }
