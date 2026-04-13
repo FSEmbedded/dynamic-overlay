@@ -217,7 +217,7 @@ Result: `/etc` ends up as a **persistent read-write overlay** with the applicati
 |-----------------|----------|
 | overlay.ini not found | Uses fallback: overlay `/etc` and `/usr/bin` only |
 | Invalid section name | Error logged, section skipped |
-| Missing required field | ConfigException thrown |
+| Missing required field | Returns `Error::config_invalid` |
 | Directory doesn't exist | Warning logged, overlay skipped |
 | Mount fails (EBUSY) | Already mounted, continue |
 | Max stacking depth | Warning logged, remaining overlays skipped |
