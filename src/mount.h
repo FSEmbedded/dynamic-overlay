@@ -1,349 +1,80 @@
 #pragma once
 
+#include "config.h"
+#include "error.h"
+
 #include <string>
-#include <cstring>
-#include <exception>
+#include <string_view>
 
 extern "C" {
     #include <sys/mount.h>
 }
 
-#ifndef PATH_TO_MOUNT_APPIMAGE
-#define PATH_TO_MOUNT_APPIMAGE "/rw_fs/root/application/current"
-#endif
-
-/**
- * Abstract mount c-interface and add the functionality to mount persistent and read-only overlay folder.
- *
- * Abstract the c-interface, also add some specific feature for mounting the persistent memory and
- * application image related folders.
- *
- * #define PATH_TO_MOUNT_APPIMAGE: Default path to mount application image.
- */
 namespace OverlayDescription
 {
-    //////////////////////////////////////////////////////////////////////////////
-    // Data Class
-    class Persistent{
-        public:
-            std::string lower_directory, work_directory, merge_directory, upper_directory;
+    struct Persistent {
+        std::string lower_directory;
+        std::string work_directory;
+        std::string merge_directory;
+        std::string upper_directory;
 
-            Persistent(){}
+        bool operator==(const Persistent &other) const noexcept
+        {
+            return lower_directory == other.lower_directory &&
+                   work_directory == other.work_directory &&
+                   merge_directory == other.merge_directory &&
+                   upper_directory == other.upper_directory;
+        }
 
-            Persistent(const Persistent & source){
-                this->lower_directory = source.lower_directory;
-                this->work_directory = source.work_directory;
-                this->merge_directory = source.merge_directory;
-                this->upper_directory = source.upper_directory;
-            }
-
-            Persistent(Persistent && source):
-                lower_directory(std::move(source.lower_directory)),
-                work_directory(std::move(source.work_directory)),
-                merge_directory(std::move(source.merge_directory)),
-                upper_directory(std::move(source.upper_directory))
-            {
-
-            }
-
-            Persistent &operator=(const Persistent &source)
-            {
-                this->lower_directory = source.lower_directory;
-                this->work_directory = source.work_directory;
-                this->merge_directory = source.merge_directory;
-                this->upper_directory = source.upper_directory;
-                return *this;
-            }
-
-            ~Persistent(){}
+        bool operator!=(const Persistent &other) const noexcept
+        {
+            return !(*this == other);
+        }
     };
 
-    class ReadOnly{
-        public:
-            std::string lower_directory, merge_directory;
+    struct ReadOnly {
+        std::string lower_directory;
+        std::string merge_directory;
 
-            ReadOnly(){}
+        bool operator==(const ReadOnly &other) const noexcept
+        {
+            return lower_directory == other.lower_directory &&
+                   merge_directory == other.merge_directory;
+        }
 
-            ReadOnly(const ReadOnly & source){
-                this->lower_directory = source.lower_directory;
-                this->merge_directory = source.merge_directory;
-            }
-
-            ReadOnly(ReadOnly && source):
-                lower_directory(std::move(source.lower_directory)),
-                merge_directory(std::move(source.merge_directory))
-            {
-
-            }
-
-            ReadOnly &operator=(const ReadOnly &source)
-            {
-                this->lower_directory = source.lower_directory;
-                this->merge_directory = source.merge_directory;
-                return *this;
-            }
-
-            // Add comparison operators
-            bool operator==(const ReadOnly& other) const {
-                return lower_directory == other.lower_directory &&
-                       merge_directory == other.merge_directory;
-            }
-
-            bool operator!=(const ReadOnly& other) const {
-                return !(*this == other);
-            }
-
-            ~ReadOnly(){}
+        bool operator!=(const ReadOnly &other) const noexcept
+        {
+            return !(*this == other);
+        }
     };
-};
-
-//////////////////////////////////////////////////////////////////////////////
-// Own Exceptions
-
-class BadLoopDeviceCreation : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        /**
-         * Error during creating a loop-device for mounting an application image.
-         * @param error_var Copy of errno during execution.
-         * @param error_str Step of execution.
-         */
-        BadLoopDeviceCreation(const int &error_var, const std::string &error_str)
-        {
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-            this->error_string = std::string("Creating loop device throw errno: \"") + std::string(std::strerror(error_var));
-            this->error_string += std::string("\" while: \"") + error_str;
-            this->error_string += std::string("\"");
-        }
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
-class BadMountApplicationImage : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        /**
-         * Mounting of application image failed.
-         * @param error_var Copy of errno during execution.
-         */
-        BadMountApplicationImage(const int & error_var)
-        {
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-
-            this->error_string = std::string("Mounting application image thrown following errno: ") + std::string(std::strerror(error_var));
-        }
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
-class BadOverlayMountPersistent : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        const OverlayDescription::Persistent mount_args;
-        /**
-         * Can not mount overlay-filesystem for persistent memory.
-         * @param error_var Copy of errno during execution.
-         * @param mount_args OverlayDescription::Persistent object which failed.
-         */
-        BadOverlayMountPersistent(const int & error_var, const OverlayDescription::Persistent & mount_args): mount_args(mount_args)
-        {
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-            this->error_string = std::string("Mounting overlay failed with: ") + std::string(std::strerror(error_var));
-        }
-        const char * what() const throw ()
-        {
-            return this->error_string.c_str();
-        }
-};
-
-class BadOverlayMountReadOnly : public std::exception
-{
-    private:
-        std::string error_string;
-        /* * Copy of errno during execution.
-         * @param mount_args OverlayDescription::ReadOnly object which failed.
-         */
-        error_t error_code;
-
-    public:
-        const OverlayDescription::ReadOnly mount_args;
-        /**
-         * Can not mount overlay-filesystem for application image.
-         * @param error_var Copy of errno during execution.
-         * @param mount_args OverlayDescription::ReadOnly object which failed.
-         */
-        BadOverlayMountReadOnly(const int & error_var, const OverlayDescription::ReadOnly & mount_args): mount_args(mount_args)
-        {
-            error_code = error_var;
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-            this->error_string = std::string("Mounting overlay failed with: ") + std::string(std::strerror(error_var));
-        }
-        const char * what() const throw ()
-        {
-            return this->error_string.c_str();
-        }
-        /**
-         * Get the error number.
-         * @return The error number.
-         */
-        int get_errno() const {
-            return error_code;
-        }
-};
-
-class CreateDirectoryOverlay : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        /**
-         * Can not create directories of persistent memory which are used for overlay-fs.
-         * @param dir Directory path which can not be created.
-         */
-        CreateDirectoryOverlay(const std::string & dir)
-        {
-            this->error_string = std::string("Mounting application image thrown following errno: ") + dir;
-        }
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
-class BadMount : public std::exception
-{
-    private:
-        std::string error_string;
-    public:
-        /**
-         * Could not mount given memory device.
-         * @param destr_dir Path to memory-device.
-         * @param loc_errno Copy of errno given during failed execution.
-         */
-        BadMount(const std::string &destr_dir, const int loc_errno)
-        {
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-            this->error_string = std::string("Mount of \"") + destr_dir;
-            this->error_string += std::string("\" failed with errno: ") + std::string(std::strerror(loc_errno));
-        }
-
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-};
-
-class BadUmount : public std::exception
-{
-    private:
-        std::string error_string;
-        int error_code;
-    public:
-        /**
-         * Could not umount given mounted folder.
-         * @param destr_dir Path to failed folder to umount.
-         * @param loc_errno Copy of errno given during failed execution.
-         */
-        BadUmount(const std::string &destr_dir, const int loc_errno)
-        {
-            error_code = loc_errno;
-            std::setlocale(LC_MESSAGES, "en_EN.utf8");
-            this->error_string = std::string("Umount of \"") + destr_dir;
-            this->error_string += std::string("\" failed with errno: ") + std::string(std::strerror(loc_errno));
-        }
-
-        /**
-         * Get the error message.
-         * @return The error message.
-         */
-        const char * what() const throw () {
-            return this->error_string.c_str();
-        }
-        /**
-         * Get the error number.
-         * @return The error number.
-         */
-        int get_errno() const {
-            return error_code;
-        }
-};
-
-//////////////////////////////////////////////////////////////////////////////
-// Main Class
+}
 
 class Mount
 {
-    private:
-        const std::string path_to_container;
+    const std::string path_to_container_;
 
-        /**
-         * Check if a path is currently mounted
-         * @param path Path to check for active mounts
-         * @return true if path is mounted, false otherwise
-         */
-        bool is_mounted(const std::string& path) const;
+    [[nodiscard]] bool is_mounted(std::string_view path) const noexcept;
 
-    public:
+public:
+    Mount() noexcept;
+    ~Mount() noexcept = default;
 
-        Mount();
+    Mount(const Mount &) = delete;
+    Mount &operator=(const Mount &) = delete;
+    Mount(Mount &&) = delete;
+    Mount &operator=(Mount &&) = delete;
 
-        Mount(const Mount &) = delete;
-        Mount &operator=(const Mount &) = delete;
-        Mount(Mount &&) = delete;
-        Mount &operator=(Mount &&) = delete;
+    [[nodiscard]] Error mount_application_image(std::string_view path_to_image) const noexcept;
 
-        /**
-         * Mount application image to the standard mounting point in image.
-         * It is not forbidden to call this step multiple times, but well it make no sense.
-         * @param pathToImage Path to application image that should be mounted
-         * @throw BadLoopDeviceCreation Error during interaction with linux kernel.
-         * @throw BadMountApplicationImage Error during mount process.
-         */
-        void mount_application_image(const std::string &) const;
+    [[nodiscard]] Error mount_overlay_persistent(const OverlayDescription::Persistent &desc) const noexcept;
 
-        /**
-         * Mount OverlayDescription::Persistent as an overlay on the current filesystem.
-         * Destination of mount point is fixed and needed directories will be created automatically.
-         * @param container DataClass object which contain all needed parameters.
-         * @throw CreateDirectoryOverlay Can not create directory for overlay.
-         * @throw BadOverlayMountPersistent Can not mount persistent memory.
-         */
-        void mount_overlay_persistent(const OverlayDescription::Persistent &) const;
+    [[nodiscard]] Error mount_overlay_readonly(const OverlayDescription::ReadOnly &desc) const noexcept;
 
-        /**
-         * Mount OverlayDescription::ReadOnly as an overlay on the current filesystem.
-         * Destination of mount point is fixed and needed directories will be created automatically.
-         * @param container DataClass object which contain all needed parameters.
-         * @throw BadOverlayMountReadOnly Can not mount read-only directories.
-         */
-        void mount_overlay_readonly(const OverlayDescription::ReadOnly &) const;
+    [[nodiscard]] Error wrapper_c_mount(std::string_view memory_device,
+                                         std::string_view dest_dir,
+                                         std::string_view options,
+                                         std::string_view filesystem,
+                                         unsigned long flag) noexcept;
 
-        /**
-         * Wrapper method of mount c-function.
-         * @param memory_device Source memory device, the root source.
-         * @param dest_dir Destination mapping for root memory device.
-         * @param options Mount options, keep empty when no options are set.
-         * @param filesystem Filesystem type.
-         * @param flag Specify the mount actions: flag=0 means new mount without any special treatment.
-         * @throw BadMount Error during mount.
-         */
-        void wrapper_c_mount(const std::string &memory_device,
-                        const std::string &dest_dir,
-                        const std::string &options,
-                        const std::string &filesystem,
-                        const unsigned long &flag);
-        /**
-         * Wrapper method of umount c-function.
-         * @param path Path to mounted directory.
-         * @throw BadUmount Umount is not possible.
-         */
-        void wrapper_c_umount(const std::string &) const;
-
-        ~Mount();
+    [[nodiscard]] Error wrapper_c_umount(std::string_view path) const noexcept;
 };

@@ -1,125 +1,114 @@
 #include "file_properties.h"
-#include <sys/xattr.h>
-#include <memory>
-#include <vector>
-#include <stdexcept>
-#include <iostream>
+#include "logging.h"
 
-bool file_properties::properties_set(const OverlayDescription::Persistent &overlay)
+#include <cerrno>
+#include <cstring>
+#include <vector>
+
+bool file_properties::properties_set(const OverlayDescription::Persistent &overlay) noexcept
 {
     const auto system_lower_dir = get_system_lower_directory(overlay.lower_directory);
 
-    /* Check if system and upper directories exist and get their stats */
-    struct stat info_system_dir{};
-    if (::stat(system_lower_dir.c_str(), &info_system_dir) == -1)
-    {
-        throw ErrnoCstat(errno, system_lower_dir);
+    struct stat info_system_dir {};
+    if (::stat(system_lower_dir.c_str(), &info_system_dir) == -1) {
+        LOG_ERRNO("stat system lower dir", errno);
+        return false;
     }
 
-    struct stat info_upper_dir{};
-    if (::stat(overlay.upper_directory.c_str(), &info_upper_dir) == -1)
-    {
-        throw ErrnoCstat(errno, overlay.upper_directory);
+    struct stat info_upper_dir {};
+    if (::stat(overlay.upper_directory.c_str(), &info_upper_dir) == -1) {
+        LOG_ERRNO("stat upper dir", errno);
+        return false;
     }
 
-    /* Compare the permissions - upper should match system directory */
     return (info_system_dir.st_uid == info_upper_dir.st_uid) &&
            (info_system_dir.st_gid == info_upper_dir.st_gid) &&
            (info_system_dir.st_mode == info_upper_dir.st_mode);
 }
 
-/* The member function copy_properties_lower_to_upper copies the properties from the system directory to the upper directory.
- * This ensures that the upper directory has the correct system permissions (root:root) instead of
- * the potentially incorrect permissions from the user-created application squashfs.
- * @param overlay Persistent overlay data structure.
- * @throws ErrnoCstat if stat fails on the system directory.
- * @throws ErrnoCchmod if chmod fails on the upper directory.
- */
-void file_properties::copy_properties_lower_to_upper(const OverlayDescription::Persistent &overlay)
+// Sync uid, gid, mode, and xattrs from lower to upper so overlayfs
+// presents consistent ownership after the first mount.
+Error file_properties::copy_properties_lower_to_upper(const OverlayDescription::Persistent &overlay) noexcept
 {
     const auto system_lower_dir = get_system_lower_directory(overlay.lower_directory);
 
-    // Copy permissions, owner and group from system directory
-    struct stat info_system_dir{};
-    if (::stat(system_lower_dir.c_str(), &info_system_dir) == -1)
-    {
-        throw ErrnoCstat(errno, system_lower_dir);
+    struct stat info_system_dir {};
+    if (::stat(system_lower_dir.c_str(), &info_system_dir) == -1) {
+        LOG_ERRNO("stat system lower dir", errno);
+        return Error::stat_failed;
     }
 
-    if (::chmod(overlay.upper_directory.c_str(), info_system_dir.st_mode) == -1)
-    {
-        throw ErrnoCchmod(errno, overlay.upper_directory);
+    if (::chmod(overlay.upper_directory.c_str(), info_system_dir.st_mode) == -1) {
+        LOG_ERRNO("chmod upper dir", errno);
+        return Error::chmod_failed;
     }
 
-    if (::chown(overlay.upper_directory.c_str(), info_system_dir.st_uid, info_system_dir.st_gid) == -1)
-    {
-        throw ErrnoCchown(errno, overlay.upper_directory);
+    if (::chown(overlay.upper_directory.c_str(), info_system_dir.st_uid, info_system_dir.st_gid) == -1) {
+        LOG_ERRNO("chown upper dir", errno);
+        return Error::chown_failed;
     }
 
-    // Copy extended attributes (xattr) from system directory
     copy_extended_attributes(system_lower_dir, overlay.upper_directory);
+
+    return Error::none;
 }
 
-void file_properties::copy_extended_attributes(const std::string &source_dir, const std::string &target_dir)
+void file_properties::copy_extended_attributes(std::string_view source_dir,
+                                                std::string_view target_dir) noexcept
 {
-    const auto list_size = ::listxattr(source_dir.c_str(), nullptr, 0);
-    if (list_size == -1 || list_size == 0)
-    {
-        // System directories might not have xattrs or error occurred, not critical
+    const std::string src(source_dir);
+    const auto list_size = ::listxattr(src.c_str(), nullptr, 0);
+    if (list_size <= 0) {
         return;
     }
 
-    // Get attribute names
     std::vector<char> list_buffer(static_cast<std::size_t>(list_size));
-    if (::listxattr(source_dir.c_str(), list_buffer.data(), list_buffer.size()) == -1)
-    {
-        std::cerr << "Warning: Error retrieving xattr list for " << source_dir << '\n';
+    if (::listxattr(src.c_str(), list_buffer.data(), list_buffer.size()) == -1) {
+        LOG_WARNING("error retrieving xattr list for " + src);
         return;
     }
 
-    // Process and copy each attribute
-    for (const char *attr = list_buffer.data(), *end = attr + list_size; attr < end;)
-    {
+    for (const char *attr = list_buffer.data(),
+                    *end = attr + static_cast<std::size_t>(list_size);
+         attr < end;) {
         const auto attr_len = std::strlen(attr);
-        if (attr_len > 0)
-        {
+        if (attr_len > 0) {
             copy_single_attribute(source_dir, target_dir, attr);
         }
         attr += attr_len + 1;
     }
 }
 
-void file_properties::copy_single_attribute(const std::string &source_dir, const std::string &target_dir, const char *attr_name)
+void file_properties::copy_single_attribute(std::string_view source_dir,
+                                             std::string_view target_dir,
+                                             const char *attr_name) noexcept
 {
-    // Get attribute value size
-    const auto value_size = ::getxattr(source_dir.c_str(), attr_name, nullptr, 0);
-    if (value_size == -1)
-    {
-        std::cerr << "Warning: Could not read xattr '" << attr_name << "'\n";
+    const std::string src(source_dir);
+    const std::string tgt(target_dir);
+
+    const auto value_size = ::getxattr(src.c_str(), attr_name, nullptr, 0);
+    if (value_size == -1) {
+        LOG_WARNING(std::string("could not read xattr '") + attr_name + "'");
         return;
     }
 
-    // Read attribute value
     std::vector<char> value_buffer(static_cast<std::size_t>(value_size));
-    if (::getxattr(source_dir.c_str(), attr_name, value_buffer.data(), value_buffer.size()) == -1)
-    {
-        std::cerr << "Warning: Could not read xattr value for '" << attr_name << "'\n";
+    if (::getxattr(src.c_str(), attr_name, value_buffer.data(), value_buffer.size()) == -1) {
+        LOG_WARNING(std::string("could not read xattr value for '") + attr_name + "'");
         return;
     }
 
-    // Copy attribute to target directory
-    if (::setxattr(target_dir.c_str(), attr_name, value_buffer.data(), static_cast<std::size_t>(value_size), 0) == -1)
-    {
-        std::cerr << "Warning: Could not set xattr '" << attr_name << "'\n";
+    if (::setxattr(tgt.c_str(), attr_name, value_buffer.data(),
+                    static_cast<std::size_t>(value_size), 0) == -1) {
+        LOG_WARNING(std::string("could not set xattr '") + attr_name + "'");
     }
 }
 
-// Helper function to extract the system (last) lower directory from a colon-separated lowerdir string
-[[nodiscard]] std::string file_properties::get_system_lower_directory(const std::string &lowerdir_string)
+std::string file_properties::get_system_lower_directory(std::string_view lowerdir_string) noexcept
 {
-    if (const auto last_colon_pos = lowerdir_string.rfind(':'); last_colon_pos != std::string::npos)
-    {
-        return lowerdir_string.substr(last_colon_pos + 1);
+    if (const auto last_colon_pos = lowerdir_string.rfind(':');
+        last_colon_pos != std::string_view::npos) {
+        return std::string(lowerdir_string.substr(last_colon_pos + 1));
     }
-    return lowerdir_string;
+    return std::string(lowerdir_string);
 }
