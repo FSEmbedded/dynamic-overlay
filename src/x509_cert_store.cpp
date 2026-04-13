@@ -1,456 +1,435 @@
 #include "x509_cert_store.h"
+#include "config.h"
+#include "logging.h"
 
+#include <cerrno>
+#include <cstring>
 #include <memory>
-#include <sstream>
-#include <vector>
-#include <iostream> /* Add for cout... */
+#include <string>
+
+#include <archive.h>
+#include <archive_entry.h>
+
+extern "C" {
 #include <fcntl.h>
-#include <stdlib.h>
-#include <sys/stat.h>  // For stat(), chmod()
+#include <sys/stat.h>
 #include <unistd.h>
+}
 
-/* set max nr. of mtd devices to max number of ubi volumes */
-#define MAX_NR_MTD_DEVICES 128
-#define BUF_SIZE 1024
+namespace {
+inline constexpr uint32_t MAX_NR_MTD_DEVICES = 128;
+inline constexpr std::size_t CERT_BUF_SIZE = 1024;
+inline constexpr int DEFAULT_SECTOR_SIZE = 512;
+} // anonymous namespace
 
-#ifndef PART_NAME_MTD_CERT
-#define PART_NAME_MTD_CERT "Secure"
-#endif
-
-#ifndef FUS_AZURE_CONFIGURATION
-#define FUS_AZURE_CONFIGURATION "/adu/du-config.json"
-#endif
-
-#define DEFAULT_SECTOR_SIZE 512
-
-x509_store::CertStore::CertStore()
+Error x509_store::CertStore::load_json_config() noexcept
 {
-    if (!std::filesystem::exists(FUS_AZURE_CONFIGURATION))
-    {
-        throw std::runtime_error(std::string("File: ") + std::string(FUS_AZURE_CONFIGURATION) +
-                                 std::string(" does not exists"));
+    if (!posix_utils::path_exists(config::fus_azure_configuration)) {
+        LOG_ERROR("azure config not found: " + std::string(config::fus_azure_configuration));
+        return Error::config_not_found;
     }
 
-    this->iot_hub_conf = std::ifstream(FUS_AZURE_CONFIGURATION, std::ifstream::in);
-    if (!this->iot_hub_conf.good())
-    {
-        if (this->iot_hub_conf.bad() || this->iot_hub_conf.fail())
-        {
-            throw OpenAzureConfigDocument(FUS_AZURE_CONFIGURATION, FileOpenMode::READ);
-        }
-    }
-
-    std::string strline;
-    std::stringstream strjson;
-    while (std::getline(this->iot_hub_conf, strline))
-    {
-        strjson << strline;
+    std::string content;
+    Error err = posix_utils::read_file_to_string(config::fus_azure_configuration, content);
+    if (err != Error::none) {
+        return err;
     }
 
     Json::CharReaderBuilder reader;
     std::string errs;
-    if (!Json::parseFromStream(reader, strjson, &root, &errs))
-    {
-        throw ParseJsonDocumentError(errs);
+    std::unique_ptr<Json::CharReader> parser(reader.newCharReader());
+    if (!parser->parse(content.data(), content.data() + content.size(), &root_, &errs)) {
+        LOG_ERROR("JSON parse error: " + errs);
+        return Error::json_parse_failed;
     }
+
+    return Error::none;
 }
 
-bool x509_store::CertStore::parseDuJsonConfig()
+Error x509_store::CertStore::save_json_config() noexcept
 {
-    if (this->root["agents"][0]["connectionSource"]["connectionType"].asString() != "x509")
-    {
-        throw NotAx509ConfigurationInDuJson();
-    }
-
-    const std::string x509_cert = this->root["agents"][0]["connectionSource"]["x509_cert"].asString();
-    const std::string x509_key = this->root["agents"][0]["connectionSource"]["x509_key"].asString();
-    const std::string x509_container = this->root["agents"][0]["connectionSource"]["x509_container"].asString();
-
-    bool update_du_json = false;
-    if (x509_cert != std::string(FUS_AZURE_CERT_CERTIFICATE_NAME))
-    {
-        this->root["agents"][0]["connectionSource"]["x509_cert"] = std::string(FUS_AZURE_CERT_CERTIFICATE_NAME);
-        update_du_json = true;
-    }
-
-    if (x509_key != std::string(FUS_AZURE_CERT_KEY_NAME))
-    {
-        this->root["agents"][0]["connectionSource"]["x509_key"] = std::string(FUS_AZURE_CERT_KEY_NAME);
-        update_du_json = true;
-    }
-
-    if (x509_container != std::string(TARGET_ARCHIV_DIR_PATH))
-    {
-        this->root["agents"][0]["connectionSource"]["x509_container"] = std::string(TARGET_ARCHIV_DIR_PATH);
-        update_du_json = true;
-    }
-
-    return update_du_json;
+    Json::StreamWriterBuilder builder;
+    const std::string json_str = Json::writeString(builder, root_);
+    return posix_utils::write_string_to_file(config::fus_azure_configuration, json_str);
 }
 
-bool x509_store::CertMDTstore::IsPartitionAvailable()
+Error x509_store::CertStore::init() noexcept
 {
-    if (uPartNumber > MAX_NR_MTD_DEVICES)
-        return false;
-    return true;
+    return load_json_config();
 }
 
-uint32_t x509_store::CertMDTstore::GetPartitionNumber()
+Error x509_store::CertStore::parseDuJsonConfig(bool &config_updated) noexcept
 {
-    return uPartNumber;
+    config_updated = false;
+
+    if (root_["agents"][0]["connectionSource"]["connectionType"].asString() != "x509") {
+        LOG_WARNING("no x509 configuration in du-config.json, skipping cert store");
+        return Error::config_invalid;
+    }
+
+    const std::string x509_cert = root_["agents"][0]["connectionSource"]["x509_cert"].asString();
+    const std::string x509_key = root_["agents"][0]["connectionSource"]["x509_key"].asString();
+    const std::string x509_container = root_["agents"][0]["connectionSource"]["x509_container"].asString();
+
+    if (x509_cert != std::string(config::fus_azure_cert_certificate_name)) {
+        root_["agents"][0]["connectionSource"]["x509_cert"] = std::string(config::fus_azure_cert_certificate_name);
+        config_updated = true;
+    }
+    if (x509_key != std::string(config::fus_azure_cert_key_name)) {
+        root_["agents"][0]["connectionSource"]["x509_key"] = std::string(config::fus_azure_cert_key_name);
+        config_updated = true;
+    }
+    if (x509_container != std::string(config::target_archiv_dir_path)) {
+        root_["agents"][0]["connectionSource"]["x509_container"] = std::string(config::target_archiv_dir_path);
+        config_updated = true;
+    }
+
+    return Error::none;
 }
 
-int x509_store::CertMDTstore::ScanForPartition(const std::string part_name)
+namespace {
+
+// RAII guard for libarchive read handle
+struct ArchiveReadDeleter {
+    void operator()(struct archive *a) const noexcept {
+        if (a != nullptr) { archive_read_free(a); }
+    }
+};
+
+// RAII guard for libarchive write-to-disk handle
+struct ArchiveWriteDeleter {
+    void operator()(struct archive *a) const noexcept {
+        if (a != nullptr) { archive_write_free(a); }
+    }
+};
+
+using ArchiveReadPtr = std::unique_ptr<struct archive, ArchiveReadDeleter>;
+using ArchiveWritePtr = std::unique_ptr<struct archive, ArchiveWriteDeleter>;
+
+Error copy_archive_data(struct archive *reader, struct archive *writer) noexcept
 {
-    int i;
-    std::string mtd_line;
+    const void *buf = nullptr;
+    std::size_t size = 0;
+    la_int64_t offset = 0;
 
-    if (IsPartitionAvailable())
-        return 0;
-
-    /* open mtd table to scan for given partition name */
-    std::ifstream mtd_table("/proc/mtd", (std::ifstream::in));
-    if (!mtd_table.good())
-    {
-        if (mtd_table.bad() || mtd_table.fail())
-        {
-            throw OpenMTDDevFailed("/pro/mtd not available.");
+    for (;;) {
+        const int r = archive_read_data_block(reader, &buf, &size, &offset);
+        if (r == ARCHIVE_EOF) { return Error::none; }
+        if (r != ARCHIVE_OK) {
+            LOG_ERROR("archive read error: " + std::string(archive_error_string(reader)));
+            return Error::read_failed;
+        }
+        if (archive_write_data_block(writer, buf, size, offset) != ARCHIVE_OK) {
+            LOG_ERROR("archive write error: " + std::string(archive_error_string(writer)));
+            return Error::write_failed;
         }
     }
-    /* read every line and check for the data partition */
-    /* first line is row description */
-    getline(mtd_table, mtd_line);
-    for (i = 0; !mtd_table.eof(); i++)
-    {
-        getline(mtd_table, mtd_line);
-        if (mtd_line.find(part_name) != std::string::npos)
-        {
-            this->uPartNumber = i;
-            return 0;
-        }
-    }
-
-    return -ENODEV;
 }
 
-void x509_store::CertMDTstore::ExtractCertStore(const std::filesystem::path &path_to_ramdisk)
+} // anonymous namespace
+
+Error x509_store::extract_archive(std::string_view archive_path,
+                                   std::string_view dest_dir) noexcept
 {
-    bool use_mdt_part_cert = false;
-    /* parse default du configuration */
-    bool update_du_json = this->parseDuJsonConfig();
-    /* use default file path for secure data */
-    std::string arch_mtd_file_path = path_to_ramdisk;
-    std::string target_mtd_cert_store = TARGET_ARCHIVE_MTD_CERT_STORE;
-    int fd, fd_wr;
-    struct fs_header_v1_0 *fsheader10;
-    struct fs_header_v0_0 *fsheader00;
-    int bytes_read = 0;
-    uint64_t file_size = 0;
-    char buffer[BUF_SIZE];
+    ArchiveReadPtr reader(archive_read_new());
+    if (!reader) { return Error::cert_store_failed; }
 
-    /* scan for secure partition if partition is available
-     * then use this.
-     */
-    if (ScanForPartition(PART_NAME_MTD_CERT) == 0)
-    {
-        /* use secure partition to read data */
-        arch_mtd_file_path = "/dev/mtd" + std::to_string(GetPartitionNumber());
-        use_mdt_part_cert = true;
+    archive_read_support_filter_bzip2(reader.get());
+    archive_read_support_format_tar(reader.get());
+
+    const std::string archive(archive_path);
+    if (archive_read_open_filename(reader.get(), archive.c_str(), CERT_BUF_SIZE) != ARCHIVE_OK) {
+        LOG_ERROR("cannot open archive: " + std::string(archive_error_string(reader.get())));
+        return Error::open_failed;
     }
 
-    fsheader10 = (struct fs_header_v1_0 *)calloc(1, sizeof(struct fs_header_v1_0));
-    fsheader00 = (struct fs_header_v0_0 *)fsheader10;
+    ArchiveWritePtr writer(archive_write_disk_new());
+    if (!writer) { return Error::cert_store_failed; }
 
-    fd = open(arch_mtd_file_path.c_str(), O_RDONLY);
-    if (fd < 0)
-    {
-        throw OpenMTDDevFailed(SOURCE_ARCHIVE_MTD_FILE_PATH);
-    }
-    bytes_read = read(fd, fsheader10, sizeof(struct fs_header_v1_0));
-    fsheader00 = (struct fs_header_v0_0 *)fsheader10;
-    file_size = fsheader00->file_size_high & 0xFFFFFFFF;
-    file_size = file_size << 32;
-    file_size = file_size | (fsheader00->file_size_low & 0xFFFFFFFF);
+    archive_write_disk_set_options(writer.get(),
+        ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
 
-    /*
-    std::cout << "arch_mtd_file_path: " << arch_mtd_file_path
-              << " filesize: " << file_size << std::endl;
-    */
+    const std::string dest(dest_dir);
+    struct archive_entry *entry = nullptr;
 
-    if (!strcmp("CERT", fsheader10->type) && (file_size > 0))
-    {
-        int chunk_size = sizeof(buffer);
-        fd_wr = open(target_mtd_cert_store.c_str(), (O_WRONLY | O_CREAT), 0600);
-
-        if (fd_wr < 0)
-        {
-            close(fd);
-            free(fsheader10);
-            throw CreateCertStore(target_mtd_cert_store);
+    for (;;) {
+        const int r = archive_read_next_header(reader.get(), &entry);
+        if (r == ARCHIVE_EOF) { break; }
+        if (r != ARCHIVE_OK) {
+            LOG_ERROR("archive header error: " + std::string(archive_error_string(reader.get())));
+            return Error::cert_store_failed;
         }
 
-        while (file_size > 0)
-        {
-            if (file_size < chunk_size)
-                chunk_size = file_size;
-            bytes_read = read(fd, buffer, chunk_size);
-            ssize_t written = write(fd_wr, buffer, bytes_read);
-            if (written == -1) {
-                throw std::runtime_error("Failed to write to certificate store: " +
-                                       std::string(strerror(errno)));
+        // Validate archive entry path before extraction
+        const char *entry_path = archive_entry_pathname(entry);
+        if (entry_path == nullptr || entry_path[0] == '/' ||
+            std::strstr(entry_path, "..") != nullptr) {
+            LOG_WARNING("skipping unsafe archive entry: " +
+                        std::string(entry_path ? entry_path : "(null)"));
+            continue;
+        }
+
+        const std::string full_path = dest + "/" + entry_path;
+        archive_entry_set_pathname(entry, full_path.c_str());
+
+        if (archive_write_header(writer.get(), entry) != ARCHIVE_OK) {
+            LOG_ERROR("extract header failed: " + std::string(archive_error_string(writer.get())));
+            return Error::write_failed;
+        }
+
+        if (archive_entry_size(entry) > 0) {
+            const Error err = copy_archive_data(reader.get(), writer.get());
+            if (err != Error::none) { return err; }
+        }
+
+        if (archive_write_finish_entry(writer.get()) != ARCHIVE_OK) {
+            LOG_ERROR("extract finish failed: " + std::string(archive_error_string(writer.get())));
+            return Error::write_failed;
+        }
+    }
+
+    return Error::none;
+}
+
+bool x509_store::CertMDTstore::IsPartitionAvailable() const noexcept
+{
+    return uPartNumber_ <= MAX_NR_MTD_DEVICES;
+}
+
+uint32_t x509_store::CertMDTstore::GetPartitionNumber() const noexcept
+{
+    return uPartNumber_;
+}
+
+int x509_store::CertMDTstore::ScanForPartition(std::string_view part_name) noexcept
+{
+    if (IsPartitionAvailable()) {
+        return 0; // Already resolved — skip rescan
+    }
+
+    std::string mtd_content;
+    if (posix_utils::read_file_to_string("/proc/mtd", mtd_content) != Error::none) {
+        LOG_ERROR("/proc/mtd not available");
+        return -1;
+    }
+
+    // Parse line by line, skip header
+    std::string_view remaining(mtd_content);
+    int i = -1; // Start at -1 to skip header line
+    while (!remaining.empty()) {
+        const auto nl = remaining.find('\n');
+        std::string_view line;
+        if (nl != std::string_view::npos) {
+            line = remaining.substr(0, nl);
+            remaining.remove_prefix(nl + 1);
+        } else {
+            line = remaining;
+            remaining = {};
+        }
+
+        if (i < 0) {
+            ++i;
+            continue; // skip header
+        }
+
+        // Match against quoted name field: mtdN: size erasesize "name"
+        const auto quote_end = line.rfind('"');
+        if (quote_end != std::string_view::npos && quote_end > 0) {
+            const auto quote_start = line.rfind('"', quote_end - 1);
+            if (quote_start != std::string_view::npos) {
+                const auto name = line.substr(quote_start + 1, quote_end - quote_start - 1);
+                if (name == part_name) {
+                    uPartNumber_ = static_cast<uint32_t>(i);
+                    return 0;
+                }
             }
+        }
+        ++i;
+    }
+
+    return -1;
+}
+
+Error x509_store::CertMDTstore::ExtractCertStore() noexcept
+{
+    Error err = init();
+    if (err != Error::none) return err;
+
+    bool config_updated = false;
+    err = parseDuJsonConfig(config_updated);
+    if (err != Error::none) return err;
+
+    if (ScanForPartition(config::part_name_mtd_cert) != 0) {
+        LOG_ERROR("MTD partition not found: " + std::string(config::part_name_mtd_cert));
+        return Error::cert_store_failed;
+    }
+
+    const std::string cert_device = "/dev/mtd" + std::to_string(GetPartitionNumber());
+    const std::string temp_archive = std::string(config::target_archiv_dir_path) + "/tmp.tar.bz2";
+    LOG_INFO("MTD cert source: " + cert_device);
+
+    auto fsheader10 = std::make_unique<fs_header_v1_0>();
+
+    FdGuard fd(::open(cert_device.c_str(), O_RDONLY));
+    if (!fd.valid()) {
+        LOG_ERRNO("open MTD cert source", errno);
+        return Error::open_failed;
+    }
+
+    ssize_t bytes_read = ::read(fd.get(), fsheader10.get(), sizeof(fs_header_v1_0));
+    if (bytes_read < static_cast<ssize_t>(sizeof(fs_header_v1_0))) {
+        LOG_ERROR("failed to read FS header from MTD");
+        return Error::read_failed;
+    }
+
+    uint64_t file_size = (static_cast<uint64_t>(fsheader10->info.file_size_high) << 32) |
+                          static_cast<uint64_t>(fsheader10->info.file_size_low);
+
+    if (std::strncmp("CERT", fsheader10->type, 4) != 0 || file_size == 0) {
+        LOG_ERROR("not a CERT type FS file");
+        return Error::cert_store_failed;
+    }
+
+    // Temp file cleanup on all exit paths (success or failure)
+    ScopeGuard cleanup_temp([&temp_archive]() {
+        static_cast<void>(posix_utils::remove_file(temp_archive));
+    });
+
+    {
+        FdGuard fd_wr(::open(temp_archive.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600));
+        if (!fd_wr.valid()) {
+            LOG_ERRNO("create cert store temp file", errno);
+            return Error::open_failed;
+        }
+
+        char buffer[CERT_BUF_SIZE];
+        while (file_size > 0) {
+            const std::size_t chunk = (file_size < sizeof(buffer))
+                ? static_cast<std::size_t>(file_size) : sizeof(buffer);
+            bytes_read = ::read(fd.get(), buffer, chunk);
+            if (bytes_read <= 0) break;
+
+            const ssize_t written = ::write(fd_wr.get(), buffer, static_cast<std::size_t>(bytes_read));
             if (written != bytes_read) {
-                throw std::runtime_error("Incomplete write to certificate store");
+                LOG_ERROR("incomplete write to cert store");
+                return Error::write_failed;
             }
-            file_size -= bytes_read;
-            if (file_size < 0)
-            {
-                // std::cout << "Read overflow : " << target_mtd_cert_store
-                //           << ", filesize: " << file_size << std::endl;
-                break;
-            }
+            file_size -= static_cast<uint64_t>(bytes_read);
         }
-        close(fd_wr);
-    }
-    else
-    {
-        close(fd);
-        free(fsheader10);
-        throw NoCERTTypeFSFile();
     }
 
-    close(fd);
-    free(fsheader10);
-
-    std::string cmd = uncompress_cmd_source_archive;
-    cmd += std::string(TARGET_ARCHIVE_MTD_CERT_STORE);
-    cmd += uncompress_cmd_dest_folder;
-    cmd += std::string(TARGET_ARCHIV_DIR_PATH);
-
-    const int ret = ::system(cmd.c_str());
-    if ((ret == -1) || (ret == 127))
-    {
-        throw CouldNotExtractCertStore(TARGET_ARCHIVE_MTD_CERT_STORE, std::string(TARGET_ARCHIV_DIR_PATH));
+    if (file_size > 0) {
+        LOG_ERROR("incomplete read from MTD cert store");
+        return Error::read_failed;
     }
 
-    std::remove(target_mtd_cert_store.c_str());
+    err = extract_archive(temp_archive, config::target_archiv_dir_path);
 
-    if (update_du_json == true && use_mdt_part_cert == false)
-    {
-        /* lets write default values */
-        Json::StreamWriterBuilder builder_writer;
-        std::unique_ptr<Json::StreamWriter> writer(builder_writer.newStreamWriter());
-        std::ofstream fus_json_du(FUS_AZURE_CONFIGURATION, std::ofstream::out);
-        if (!fus_json_du.good())
-        {
-            if (fus_json_du.bad() || fus_json_du.fail())
-            {
-                throw OpenAzureConfigDocument(FUS_AZURE_CONFIGURATION, FileOpenMode::WRITE);
-            }
+    if (err != Error::none) {
+        return err;
+    }
+
+    if (config_updated) {
+        const Error save_err = save_json_config();
+        if (save_err != Error::none) {
+            LOG_WARNING("failed to save du-config.json");
         }
-        writer->write(this->root, &fus_json_du);
-        fus_json_du.close();
     }
+
+    return Error::none;
 }
 
-void x509_store::CertMMCstore::ExtractCertStore(const std::filesystem::path &path_to_ramdisk, const std::string bootdevice)
+Error x509_store::CertMMCstore::ExtractCertStore(std::string_view bootdevice) noexcept
 {
-    const bool update_du_json = this->parseDuJsonConfig();
-    /* use default file path for secure data */
-    const std::filesystem::path dev {R"(/dev)"};
-    const std::filesystem::path path_to_update_image(dev / bootdevice);
-    bool use_part_cert = true;
-    std::unique_ptr<struct fs_header_v1_0> fsheader10 = std::make_unique<struct fs_header_v1_0>();
-    std::ifstream update_img(path_to_update_image, (std::ifstream::in | std::ifstream::binary));
-    std::string target_update_store = (path_to_ramdisk / std::string("tmp.tar.bz2"));
-    std::string update_image_file = path_to_update_image;
-    int target_sector = EMMC_SECURE_PART_BLK_NR;
+    Error err = init();
+    if (err != Error::none) return err;
 
-    // open file
-    if (!update_img.good())
-    {
-        if (update_img.bad() || update_img.fail())
-        {
-            std::string error_str = std::string("Open file ") + update_image_file + std::string("fails");
-            throw OpenMMCDevFailed(SOURCE_ARCHIVE_MMC_FILE_PATH);
-        }
+    bool config_updated = false;
+    err = parseDuJsonConfig(config_updated);
+    if (err != Error::none) return err;
+
+    const std::string path_to_update_image = "/dev/" + std::string(bootdevice);
+    const std::string temp_archive = std::string(config::target_archiv_dir_path) + "/tmp.tar.bz2";
+    LOG_INFO("eMMC cert source: " + path_to_update_image
+             + " block " + std::to_string(config::emmc_secure_part_blk_nr));
+
+    FdGuard fd_in(::open(path_to_update_image.c_str(), O_RDONLY));
+    if (!fd_in.valid()) {
+        LOG_ERRNO("open MMC device", errno);
+        return Error::open_failed;
     }
 
-    update_img.seekg(target_sector * DEFAULT_SECTOR_SIZE);
+    const off_t target_offset = static_cast<off_t>(config::emmc_secure_part_blk_nr)
+                                * static_cast<off_t>(DEFAULT_SECTOR_SIZE);
+    if (::lseek(fd_in.get(), target_offset, SEEK_SET) == -1) {
+        LOG_ERRNO("lseek to secure partition", errno);
+        return Error::read_failed;
+    }
 
-    update_img.read((char *)fsheader10.get(), sizeof(struct fs_header_v1_0));
+    auto fsheader10 = std::make_unique<fs_header_v1_0>();
+    ssize_t bytes_read = ::read(fd_in.get(), fsheader10.get(), sizeof(fs_header_v1_0));
+    if (bytes_read < static_cast<ssize_t>(sizeof(fs_header_v1_0))) {
+        LOG_ERROR("failed to read FS header from MMC");
+        return Error::read_failed;
+    }
 
-    uint64_t file_size = 0;
-    file_size = fsheader10->info.file_size_high & 0xFFFFFFFF;
-    file_size = file_size << 32;
-    file_size = file_size | (fsheader10->info.file_size_low & 0xFFFFFFFF);
+    uint64_t file_size = (static_cast<uint64_t>(fsheader10->info.file_size_high) << 32) |
+                          static_cast<uint64_t>(fsheader10->info.file_size_low);
 
-    if (!std::strcmp("CERT", fsheader10->type) && (file_size > 0))
+    if (std::strncmp("CERT", fsheader10->type, 4) != 0 || file_size == 0) {
+        LOG_ERROR("not a CERT type FS file on MMC");
+        return Error::cert_store_failed;
+    }
+
+    // Temp file cleanup on all exit paths (success or failure)
+    ScopeGuard cleanup_temp([&temp_archive]() {
+        static_cast<void>(posix_utils::remove_file(temp_archive));
+    });
+
     {
-        uint64_t cursor;
-        char BUFFER[BUFSIZ] = {0};
-#ifdef DEBUG
-        std::cout << "FS-Header available " << std::endl;
-#endif
-        std::ofstream archive_store(target_update_store, (std::ofstream::out | std::ofstream::binary));
-        if (!archive_store.good())
-        {
-            if (archive_store.bad() || archive_store.fail())
-            {
-                std::string error_str = std::string("Open file ") + target_update_store + std::string("fails");
-                throw CreateCertStore(target_update_store);
+        FdGuard fd_out(::open(temp_archive.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600));
+        if (!fd_out.valid()) {
+            LOG_ERRNO("create cert store temp file", errno);
+            return Error::open_failed;
+        }
+
+        char buffer[CERT_BUF_SIZE];
+        uint64_t remaining = file_size;
+        while (remaining > 0) {
+            const std::size_t chunk = (remaining < sizeof(buffer))
+                ? static_cast<std::size_t>(remaining) : sizeof(buffer);
+            bytes_read = ::read(fd_in.get(), buffer, chunk);
+            if (bytes_read <= 0) break;
+
+            const ssize_t written = ::write(fd_out.get(), buffer, static_cast<std::size_t>(bytes_read));
+            if (written != bytes_read) {
+                LOG_ERROR("incomplete write to cert store");
+                return Error::write_failed;
             }
+            remaining -= static_cast<uint64_t>(bytes_read);
         }
-        for(cursor = 0; (cursor + sizeof(BUFFER)) <= file_size; cursor += sizeof(BUFFER))
-        {
-            update_img.read((char *) BUFFER, sizeof(BUFFER));
-            archive_store.write(BUFFER, sizeof(BUFFER));
+
+        if (remaining > 0) {
+            LOG_ERROR("incomplete read from MMC cert store");
+            return Error::read_failed;
         }
-        if(cursor < file_size)
-        {
-            uint64_t rest_size = (file_size - cursor);
-            update_img.read((char *) BUFFER, rest_size);
-            archive_store.write(BUFFER, rest_size);
+    }
+
+    LOG_DEBUG("cert store file written: " + temp_archive);
+
+    err = extract_archive(temp_archive, config::target_archiv_dir_path);
+
+    if (err != Error::none) {
+        return err;
+    }
+
+    if (config_updated) {
+        const Error save_err = save_json_config();
+        if (save_err != Error::none) {
+            LOG_WARNING("failed to save du-config.json");
         }
-        archive_store.flush();
-        archive_store.close();
-        update_img.close();
-    }
-    else
-    {
-        throw CreateCertStore(std::string("Update has wrong format"));
-    }
-#ifdef DEBUG
-    std::cout << "File " << target_update_store << " written." << std::endl;
-#endif
-
-    if (!std::filesystem::exists(target_update_store))
-    {
-        throw OpenMMCDevFailed(target_update_store);
     }
 
-    std::string cmd = uncompress_cmd_source_archive;
-    cmd += target_update_store;
-    cmd += uncompress_cmd_dest_folder;
-    cmd += std::string(TARGET_ARCHIV_DIR_PATH);
-
-    const int ret = ::system(cmd.c_str());
-    if ((ret == -1) || (ret == 127))
-    {
-        throw CouldNotExtractCertStore(SOURCE_ARCHIVE_MMC_FILE_PATH, std::string(TARGET_ARCHIV_DIR_PATH));
-    }
-
-    remove(target_update_store.c_str());
-
-    if (update_du_json == true && use_part_cert == false)
-    {
-        Json::StreamWriterBuilder builder_writer;
-        std::unique_ptr<Json::StreamWriter> writer(builder_writer.newStreamWriter());
-        std::ofstream fus_json_du(FUS_AZURE_CONFIGURATION, std::ofstream::out);
-        if (!fus_json_du.good())
-        {
-            if (fus_json_du.bad() || fus_json_du.fail())
-            {
-                throw OpenAzureConfigDocument(FUS_AZURE_CONFIGURATION, FileOpenMode::WRITE);
-            }
-        }
-        writer->write(this->root, &fus_json_du);
-        fus_json_du.close();
-    }
+    return Error::none;
 }
 
-OverlayDescription::Persistent x509_store::prepare_ramdisk_readable(const std::filesystem::path &path_to_ramdisk)
-{
-    if (!std::filesystem::exists(path_to_ramdisk))
-    {
-        if (!std::filesystem::create_directories(path_to_ramdisk))
-        {
-            throw(CreateRAMfsMountpoint(path_to_ramdisk));
-        }
-    }
-
-    Mount mount;
-
-    mount.wrapper_c_mount("none", path_to_ramdisk, "size=8M", "tmpfs", 0);
-
-    OverlayDescription::Persistent ramdisk;
-    ramdisk.lower_directory = std::string(TARGET_ADU_DIR_PATH);
-    ramdisk.merge_directory = std::string(TARGET_ADU_DIR_PATH);
-
-    ramdisk.upper_directory = path_to_ramdisk;
-    ramdisk.upper_directory += std::string("/upper");
-
-    ramdisk.work_directory = path_to_ramdisk;
-    ramdisk.work_directory += std::string("/work");
-
-    // Get permissions from lower directory
-    struct stat lower_stat;
-    if (stat(ramdisk.lower_directory.c_str(), &lower_stat) != 0) {
-        throw std::runtime_error("Failed to get lower directory permissions");
-    }
-
-    // Create directories
-    if (!std::filesystem::exists(ramdisk.upper_directory))
-    {
-        std::filesystem::create_directories(ramdisk.upper_directory);
-
-        // Apply permissions and ownership from lower to upper directory
-        chmod(ramdisk.upper_directory.c_str(), lower_stat.st_mode & 07777);
-        chown(ramdisk.upper_directory.c_str(), lower_stat.st_uid, lower_stat.st_gid);
-        if (chown(ramdisk.upper_directory.c_str(),
-                  lower_stat.st_uid,
-                  lower_stat.st_gid) != 0) {
-            std::cerr << "Warning: Failed to set ownership of upper directory: "
-                      << strerror(errno) << std::endl;
-        }
-    }
-
-    if (!std::filesystem::exists(ramdisk.work_directory))
-    {
-        std::filesystem::create_directories(ramdisk.work_directory);
-        // Optional: Also set the same permissions for work directory
-        chmod(ramdisk.work_directory.c_str(), lower_stat.st_mode & 07777);
-        chown(ramdisk.work_directory.c_str(), lower_stat.st_uid, lower_stat.st_gid);
-        if (chown(ramdisk.work_directory.c_str(),
-                  lower_stat.st_uid,
-                  lower_stat.st_gid) != 0) {
-            std::cerr << "Warning: Failed to set ownership of work directory: "
-                      << strerror(errno) << std::endl;
-        }
-    }
-
-    mount.mount_overlay_persistent(ramdisk);
-    return ramdisk;
-}
-
-OverlayDescription::ReadOnly x509_store::prepare_readonly_overlay_from_ramdisk (const std::filesystem::path &path_to_ramdisk)
-{
-    Mount mount;
-    mount.wrapper_c_mount("none", path_to_ramdisk, "", "tmpfs", MS_REMOUNT | MS_RDONLY);
-
-    OverlayDescription::ReadOnly ramdisk_ro;
-    ramdisk_ro.lower_directory = path_to_ramdisk;
-    ramdisk_ro.lower_directory += std::string("/upper");
-
-    ramdisk_ro.merge_directory = TARGET_ADU_DIR_PATH;
-
-    return ramdisk_ro;
-}
-
-bool x509_store::close_ramdisk(const std::filesystem::path &path_to_ramdisk)
-{
-    try {
-        // Check if the ramdisk directory exists
-        if (!std::filesystem::exists(path_to_ramdisk)) {
-            return false;
-        }
-
-        // First attempt to unmount
-        Mount mount;
-        mount.wrapper_c_umount(path_to_ramdisk);
-    } catch (const std::exception& e) {
-        // Error handling
-        return false;
-    }
-    return true;
-}
