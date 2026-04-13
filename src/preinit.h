@@ -1,76 +1,41 @@
 #pragma once
-#include <filesystem>
-#include <vector>
+
+#include "error.h"
+#include "mount.h"
+
 #include <string>
-#include <exception>
-#include <stdexcept>
+#include <vector>
 
-#include "dynamic_mounting.h"
-
-/**
- *  Enqueue mount commands and execute them at one time. If one of it fails, the currently mounted filesystems will be umounted.
- */
+// Ordered mount/unmount for early boot virtual filesystems (/proc, /sys,
+// persistent memory). Rollback unmounts in reverse order on failure.
 namespace PreInit
 {
-    struct MountArgs{
+    struct MountArgs {
         std::string source_dir;
         std::string dest_dir;
         std::string options;
         std::string filesystem_type;
-        unsigned long flags;
-
-        MountArgs()
-        {   
-            this->source_dir = std::string("");
-            this->dest_dir = std::string("");
-            this->options = "";
-            this->filesystem_type = std::string("");
-            this->flags = 0;
-        }
-        
-        MountArgs(const MountArgs & cl)
-        {
-            this->source_dir        = cl.source_dir;
-            this->dest_dir          = cl.dest_dir;
-            this->options           = cl.options;
-            this->filesystem_type   = cl.filesystem_type;
-            this->flags             = cl.flags;
-        }
+        unsigned long flags = 0;
     };
 
     class PreInit
     {
-        private:
-            static bool one_time_init;
-            void handle_preaparation_error();
-            std::vector<std::string> mounted_paths;
-            std::vector<MountArgs> mount_prep;
+        std::vector<std::string> mounted_paths_;
+        std::vector<MountArgs> mount_prep_;
 
-        public:
-            PreInit();
-            ~PreInit();
+    public:
+        PreInit() noexcept = default;
+        ~PreInit() noexcept = default;
 
-            PreInit(const PreInit &) = delete;
-            PreInit &operator=(const PreInit &) = delete;
-            PreInit(PreInit &&) = delete;
-            PreInit &operator=(PreInit &&) = delete;
+        PreInit(const PreInit &) = delete;
+        PreInit &operator=(const PreInit &) = delete;
+        PreInit(PreInit &&) = delete;
+        PreInit &operator=(PreInit &&) = delete;
 
-            /**
-             * Run all enqueued mount commands.
-             * If error occurs the already mounted filesystems will be removed.
-             */
-            void prepare();
+        void add(const MountArgs &args);
 
-            /**
-             * Mount tasks can be added here as transfer object.
-             * @param handler Mount argument.
-             */
-            void add(const MountArgs &);
+        [[nodiscard]] Error prepare() noexcept;
 
-            /**
-             * Remove mount path.
-             * @param path path to mountpoint.
-             */
-            void remove(const MountArgs &);
+        [[nodiscard]] Error remove(const MountArgs &args) noexcept;
     };
-};
+}

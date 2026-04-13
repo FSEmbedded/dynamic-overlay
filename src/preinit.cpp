@@ -1,70 +1,55 @@
 #include "preinit.h"
-#include <optional>
+#include "logging.h"
+
 #include <algorithm>
-
-PreInit::PreInit::PreInit()
-{
-
-}
-
-PreInit::PreInit::~PreInit()
-{
-
-}
 
 void PreInit::PreInit::add(const MountArgs &handler)
 {
-    this->mount_prep.push_back(handler);
+    mount_prep_.push_back(handler);
 }
 
-void PreInit::PreInit::prepare()
-{   
-    Mount mount_handler = Mount();
-    try 
-    {  
-        for (auto &entry: this->mount_prep)
-        {   
-            mount_handler.wrapper_c_mount(
-                entry.source_dir,
-                entry.dest_dir,
-                entry.options,
-                entry.filesystem_type,
-                entry.flags
-            );
-            this->mounted_paths.push_back(entry.dest_dir);
-        }
-    }
-    catch(const std::exception& e)
-    {   
-        for (auto &entry: this->mounted_paths)
-        {
-            mount_handler.wrapper_c_umount(entry);
-        }
-        throw;
-    }
-}
-
-void PreInit::PreInit::remove(const MountArgs &obj)
+Error PreInit::PreInit::prepare() noexcept
 {
-    Mount mount_handler = Mount();
-    std::optional<std::filesystem::path> path;
-    for(const auto & entry: this->mounted_paths)
-    {
-        if(entry == obj.dest_dir)
-        {
-            path = std::optional<std::filesystem::path>(obj.dest_dir);
-            break;
+    Mount mount_handler;
+
+    for (auto &entry : mount_prep_) {
+        const Error err = mount_handler.wrapper_c_mount(
+            entry.source_dir,
+            entry.dest_dir,
+            entry.options,
+            entry.filesystem_type,
+            entry.flags
+        );
+
+        if (err != Error::none) {
+            LOG_ERROR("prepare: mount failed for " + entry.dest_dir);
+            // Rollback already-mounted paths in reverse order
+            for (auto it = mounted_paths_.rbegin(); it != mounted_paths_.rend(); ++it) {
+                static_cast<void>(mount_handler.wrapper_c_umount(*it));
+            }
+            mounted_paths_.clear();
+            return err;
         }
+        mounted_paths_.push_back(entry.dest_dir);
     }
-    if(path)
-    {
-        this->mounted_paths.erase(std::remove(this->mounted_paths.begin(), this->mounted_paths.end(), path.value()), this->mounted_paths.end());
-        mount_handler.wrapper_c_umount(path.value());
+
+    return Error::none;
+}
+
+Error PreInit::PreInit::remove(const MountArgs &obj) noexcept
+{
+    auto it = std::find(mounted_paths_.begin(), mounted_paths_.end(), obj.dest_dir);
+    if (it == mounted_paths_.end()) {
+        LOG_ERROR("remove: path not found in mounted list: " + obj.dest_dir);
+        return Error::not_mounted;
     }
-    else
-    {
-        std::string error_msg = "Mount object does not contain an already mounted destination path: ";
-        error_msg += obj.dest_dir;
-        throw(std::logic_error(error_msg));
+
+    Mount mount_handler;
+    const Error err = mount_handler.wrapper_c_umount(obj.dest_dir);
+    if (err != Error::none) {
+        return err;
     }
+
+    mounted_paths_.erase(it);
+    return Error::none;
 }

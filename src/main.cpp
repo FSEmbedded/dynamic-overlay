@@ -1,167 +1,224 @@
+#include "config.h"
+#include "error.h"
+#include "logging.h"
+#include "posix_utils.h"
 #include "u-boot.h"
 #include "dynamic_mounting.h"
 #include "preinit.h"
 #include "persistent_mem_detector.h"
 #include "create_link.h"
 
+#include <string>
+
+extern "C" {
+#include <sys/mount.h>
+}
+
 #ifdef BUILD_X509_CERTIFICATE_STORE_MOUNT
     #include "x509_cert_store.h"
-#endif
+    #include "mount.h"
 
-#include <iostream>
-#include <string>
-#include <memory>
-
+extern "C" {
+#include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <pwd.h>
+#include <grp.h>
+}
 
-#include <sys/types.h>   // uid_t, gid_t
-#include <sys/stat.h>    // for struct stat und stat()-Funktionen
-#include <sys/wait.h>    // for waitpid() und WIFEXITED, WEXITSTATUS
-#include <pwd.h>         // for getpwnam() und struct passwd
-#include <grp.h>         // for getgrnam() und struct group
-#include <errno.h>       // for errno und Fehlercodes
+namespace {
 
-int main()
+class DirGuard {
+    DIR *dir_ = nullptr;
+
+public:
+    explicit DirGuard(DIR *d) noexcept : dir_(d) {}
+    ~DirGuard() noexcept { if (dir_) ::closedir(dir_); }
+    DirGuard(const DirGuard &) = delete;
+    DirGuard &operator=(const DirGuard &) = delete;
+    [[nodiscard]] DIR *get() const noexcept { return dir_; }
+    [[nodiscard]] bool valid() const noexcept { return dir_ != nullptr; }
+};
+
+[[nodiscard]] Error chown_recursive(std::string_view path, uid_t uid, gid_t gid) noexcept
 {
-    try
-    {
-        PreInit::MountArgs proc = PreInit::MountArgs();
-        proc.source_dir = std::string("proc");
-        proc.dest_dir = std::string("/proc");
-        proc.filesystem_type = "proc";
-        proc.flags = MS_NOSUID | MS_NOEXEC | MS_NODEV;
+    const std::string p(path);
 
-        PreInit::MountArgs sys = PreInit::MountArgs();
-        sys.source_dir = std::string("sys");
-        sys.dest_dir = std::string("/sys");
-        sys.filesystem_type = "sysfs";
-        sys.flags = MS_NOSUID | MS_NOEXEC | MS_NODEV;
+    if (::lchown(p.c_str(), uid, gid) != 0) {
+        LOG_ERRNO("chown_recursive: lchown failed", errno);
+        return Error::chown_failed;
+    }
 
-        PreInit::MountArgs persistent = PreInit::MountArgs();
+    struct stat st {};
+    if (::lstat(p.c_str(), &st) != 0) {
+        return Error::stat_failed;
+    }
 
-        OverlayDescription::ReadOnly ramdisk;
+    if (!S_ISDIR(st.st_mode)) {
+        return Error::none;
+    }
 
-        PreInit::PreInit init_stage1 = PreInit::PreInit();
+    DirGuard dir(::opendir(p.c_str()));
+    if (!dir.valid()) {
+        LOG_ERRNO("chown_recursive: opendir failed", errno);
+        return Error::open_failed;
+    }
 
-        /* First mount proc and then sysfs. This ensures
-         * necessary system info is available before starting
-         * other filesystems and services.
-        */
-        init_stage1.add(proc);
-        init_stage1.add(sys);
-        init_stage1.prepare();
+    struct dirent *entry = nullptr;
+    while ((entry = ::readdir(dir.get())) != nullptr) {
+        const std::string_view name(entry->d_name);
+        if (name == "." || name == "..") continue;
 
-        PersistentMemDetector::PersistentMemDetector mem_dect;
-        std::shared_ptr<UBoot> uboot = std::make_shared<UBoot>(std::string("/etc/fw_env.config"));
-
-        std::exception_ptr error_during_mount_persistent;
-        try
-        {
-            PreInit::PreInit init_stage2 = PreInit::PreInit();
-            persistent.source_dir = mem_dect.getPathToPersistentMemoryDevice(uboot);
-            persistent.dest_dir = mem_dect.getPathToPersistentMemoryDeviceMountPoint();
-            persistent.flags = 0;
-            if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
-            {
-                persistent.filesystem_type = "ext4";
-            }
-            else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
-            {
-                persistent.filesystem_type = "ubifs";
-            }
-            else
-            {
-                throw(std::logic_error("Could not determine current memory type (NAND|eMMC)"));
-            }
-            init_stage2.add(persistent);
-            init_stage2.prepare();
-        }
-        catch (const std::exception &err)
-        {
-            std::cerr << "dynamicoverlay: Error during mount persistent memory: " << err.what() << std::endl;
-        }
-
-        create_link::create_link_to_system_conf(mem_dect.getMemType(), mem_dect.getBootDevice());
-        create_link::create_link_to_fw_env_conf(mem_dect.getMemType(), mem_dect.getBootDevice());
-
-        try
-        {
-            // The overlay link is not updated in this scope. It must use "the old" path.
-            DynamicMounting handler(uboot);
-#ifdef BUILD_X509_CERTIFICATE_STORE_MOUNT
-            OverlayDescription::ReadOnly ramdisk_x509_unpacked_store;
-            x509_store::prepare_ramdisk_readable(RAMFS_CERT_STORE_MOUNTPOINT);
-            bool handle_secure_store_fails = false;
-            /* Handling to extract secure store is not critical.
-            *  Handle exception from store as warnings.
-            */
-            try {
-
-                if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC)
-                {
-                    x509_store::CertMMCstore cert_store;
-                    cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT, mem_dect.getBootDevice());
-                }
-                else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND)
-                {
-                    x509_store::CertMDTstore cert_store;
-                    cert_store.ExtractCertStore(RAMFS_CERT_STORE_MOUNTPOINT);
-                }
-
-                /* after installation prepare for permissions */
-                int ret = ::system("chown -R adu:adu /adu");
-                if (ret == -1) {
-                    std::cerr << "dynamicoverlay: Error executing chown command: " << strerror(errno) << std::endl;
-                    throw std::runtime_error("Failed to execute chown command");
-                } else if (ret == 127) {
-                    std::cerr << "dynamicoverlay: Error: Shell could not execute chown command" << std::endl;
-                    throw std::runtime_error("Shell execution failed");
-                } else if (WIFEXITED(ret) && WEXITSTATUS(ret) != 0) {
-                    std::cerr << "dynamicoverlay: Warning: chown command exited with status "
-                              << WEXITSTATUS(ret) << std::endl;
-                }
-
-                struct stat dir_stat;
-                if (stat("/adu", &dir_stat) == 0) {
-                    // Get UID und GID for test only
-                    struct passwd *pwd = getpwnam("adu");
-                    struct group *grp = getgrnam("adu");
-
-                    if (pwd && grp && (dir_stat.st_uid != pwd->pw_uid || dir_stat.st_gid != grp->gr_gid)) {
-                        std::cerr << "Warning: Directory permissions were not set correctly" << std::endl;
-                    }
-                }
-
-                ramdisk_x509_unpacked_store = x509_store::prepare_readonly_overlay_from_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
-
-                handler.add_lower_dir_readonly_memory(ramdisk_x509_unpacked_store);
-            } catch(std::exception const& ex) {
-                std::cerr << "dynamicoverlay: Warning, " << ex.what() << std::endl;
-            }  catch(int e) {
-                std::cerr << "dynamicoverlay: Warning, directory adu can't change own %d" << e << std::endl;
-            }
-
-            if(handle_secure_store_fails == true)
-                x509_store::close_ramdisk(RAMFS_CERT_STORE_MOUNTPOINT);
-#endif
-            handler.application_image();
-        }
-        catch(...)
-        {
-            error_during_mount_persistent = std::current_exception();
-        }
-
-        init_stage1.remove(sys);
-        init_stage1.remove(proc);
-
-        if(error_during_mount_persistent)
-        {
-            std::rethrow_exception(error_during_mount_persistent);
+        const std::string child = p + "/" + std::string(name);
+        const Error err = chown_recursive(child, uid, gid);
+        if (err != Error::none) {
+            LOG_WARNING("chown_recursive: failed for " + child);
         }
     }
-    catch (const std::exception &err)
+
+    return Error::none;
+}
+
+} // anonymous namespace
+#endif
+
+// Preinit entry point — runs before any init system.
+// Boot sequence: /proc+/sys → detect storage → mount persistent →
+// create config links → mount overlays → (optional: cert store) →
+// unmount /proc+/sys → exec init.
+int main()
+{
+    // Stage 1: mount /proc and /sys
+    PreInit::MountArgs proc_args;
+    proc_args.source_dir = "proc";
+    proc_args.dest_dir = "/proc";
+    proc_args.filesystem_type = "proc";
+    proc_args.flags = MS_NOSUID | MS_NOEXEC | MS_NODEV;
+
+    PreInit::MountArgs sys_args;
+    sys_args.source_dir = "sys";
+    sys_args.dest_dir = "/sys";
+    sys_args.filesystem_type = "sysfs";
+    sys_args.flags = MS_NOSUID | MS_NOEXEC | MS_NODEV;
+
+    PreInit::PreInit init_stage1;
+    init_stage1.add(proc_args);
+    init_stage1.add(sys_args);
+
+    Error err = init_stage1.prepare();
+    if (err != Error::none) {
+        LOG_FATAL("failed to mount /proc and /sys");
+        return 1;
+    }
+
+    // Detect persistent memory
+    PersistentMemDetector::PersistentMemDetector mem_dect;
+    err = PersistentMemDetector::PersistentMemDetector::create(mem_dect);
+    if (err != Error::none) {
+        LOG_ERROR("failed to detect persistent memory: " + std::string(error_to_string(err)));
+    }
+
+    // Create U-Boot handler on stack
+    UBoot uboot(config::uboot_env_path);
+
+    // Stage 2: mount persistent memory
+    if (err == Error::none) {
+        PreInit::MountArgs persistent_args;
+        std::string persistent_device;
+        err = mem_dect.getPathToPersistentMemoryDevice(uboot, persistent_device);
+        if (err == Error::none) {
+            persistent_args.source_dir = persistent_device;
+            persistent_args.dest_dir = std::string(mem_dect.getPathToPersistentMemoryDeviceMountPoint());
+            persistent_args.flags = 0;
+
+            if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC) {
+                persistent_args.filesystem_type = "ext4";
+            } else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND) {
+                persistent_args.filesystem_type = "ubifs";
+            } else {
+                LOG_ERROR("could not determine memory type (NAND|eMMC)");
+                err = Error::memory_detect_failed;
+            }
+
+            if (err == Error::none) {
+                PreInit::PreInit init_stage2;
+                init_stage2.add(persistent_args);
+                err = init_stage2.prepare();
+                if (err != Error::none) {
+                    LOG_ERROR("failed to mount persistent memory");
+                }
+            }
+        } else {
+            LOG_ERROR("failed to get persistent memory device path");
+        }
+    }
+
+    // Create config links
+    if (mem_dect.getMemType() != PersistentMemDetector::MemType::None) {
+        static_cast<void>(create_link::create_link_to_system_conf(
+            mem_dect.getMemType(), mem_dect.getBootDevice()));
+        static_cast<void>(create_link::create_link_to_fw_env_conf(
+            mem_dect.getMemType(), mem_dect.getBootDevice()));
+    }
+
+    // Dynamic mounting
+    Error mount_error = Error::none;
     {
-        std::cerr << "dynamicoverlay: Error during execution: " << err.what() << std::endl;
+        DynamicMounting handler(uboot);
+        mount_error = handler.application_image();
+    }
+
+#ifdef BUILD_X509_CERTIFICATE_STORE_MOUNT
+    // X.509 cert store: mount tmpfs on target dir, extract certs, freeze readonly
+    // Runs after application_image() so /etc overlay is available
+    {
+        const std::string cert_dir(config::target_archiv_dir_path);
+        Mount cert_mount;
+        bool cert_tmpfs_mounted = false;
+
+        Error cert_err = posix_utils::mkdir_p(cert_dir);
+        if (cert_err == Error::none) {
+            cert_err = cert_mount.wrapper_c_mount("none", cert_dir, "size=1M", "tmpfs", 0);
+            if (cert_err == Error::none) {
+                cert_tmpfs_mounted = true;
+            }
+        }
+
+        if (cert_err == Error::none) {
+            if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC) {
+                x509_store::CertMMCstore cert_store;
+                cert_err = cert_store.ExtractCertStore(mem_dect.getBootDevice());
+            } else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND) {
+                x509_store::CertMDTstore cert_store;
+                cert_err = cert_store.ExtractCertStore();
+            }
+        }
+
+        if (cert_err == Error::none) {
+            struct passwd *pwd = ::getpwnam("adu");
+            struct group *grp = ::getgrnam("adu");
+            if (pwd && grp) {
+                static_cast<void>(chown_recursive(cert_dir, pwd->pw_uid, grp->gr_gid));
+            } else {
+                LOG_WARNING("user/group 'adu' not found");
+            }
+
+            // Freeze: remount readonly
+            static_cast<void>(cert_mount.wrapper_c_mount(
+                "none", cert_dir, "", "tmpfs", MS_REMOUNT | MS_RDONLY));
+        } else if (cert_tmpfs_mounted) {
+            LOG_WARNING("cert store failed: " + std::string(error_to_string(cert_err)));
+            static_cast<void>(cert_mount.wrapper_c_umount(cert_dir));
+        }
+    }
+#endif
+
+    // Cleanup: unmount /sys and /proc
+    static_cast<void>(init_stage1.remove(sys_args));
+    static_cast<void>(init_stage1.remove(proc_args));
+
+    if (mount_error != Error::none) {
+        LOG_ERROR("error during dynamic mounting: " + std::string(error_to_string(mount_error)));
     }
 
     return 0;
