@@ -1,245 +1,248 @@
 #include "persistent_mem_detector.h"
+#include "config.h"
+#include "posix_utils.h"
+#include "string_utils.h"
+#include "logging.h"
 
-#include <fstream>
-#include <iostream>
+#include <cerrno>
+#include <cstring>
 
-#include <blkid/blkid.h> /* blkid functions */
+extern "C" {
+#include <dirent.h>
+#include <blkid/blkid.h>
+}
 
-namespace fs = std::filesystem; // Alias for filesystem
+namespace {
 
-/* Use default values of regular expression,
- * if it is not definded in build process.
- * Use raw string literal to make expression simpler
-*/
-/* Regular expression to detect boot device (mmc) */
-#ifndef PERSISTMEMORY_REGEX_EMMC
-#define PERSISTMEMORY_REGEX_EMMC R"(root=\/dev\/(mmcblk[0-2]))"
-#endif
-/* Regular expression to detect boot device (nand) with ubifs.
- */
-#ifndef PERSISTMEMORY_REGEX_NAND
-#define PERSISTMEMORY_REGEX_NAND R"(root=\/dev\/(ubiblock\d+_\d+))"
-#endif
+class DirGuard {
+    DIR *dir_ = nullptr;
 
-/* Name of volume or partition of persitent memory */
-#ifndef PERSISTMEMORY_DEVICE_NAME
-#define PERSISTMEMORY_DEVICE_NAME "data"
-#endif
+public:
+    explicit DirGuard(DIR *d) noexcept : dir_(d) {}
+    ~DirGuard() noexcept { if (dir_) ::closedir(dir_); }
 
-#ifndef PERSISTENT_MEMORY_MOUNTPOINT
-#define PERSISTENT_MEMORY_MOUNTPOINT "/rw_fs/root"
-#endif
+    DirGuard(const DirGuard &) = delete;
+    DirGuard &operator=(const DirGuard &) = delete;
 
-PersistentMemDetector::PersistentMemDetector::PersistentMemDetector()
-    : nand_memory(PERSISTMEMORY_REGEX_NAND), emmc_memory(PERSISTMEMORY_REGEX_EMMC), mem_type(MemType::None),
-    boot_device(""), path_to_mountpoint(PERSISTENT_MEMORY_MOUNTPOINT)
-{
-    std::ifstream bootdev("/sys/bdinfo/boot_dev");
-    if (bootdev)
+    [[nodiscard]] DIR *get() const noexcept { return dir_; }
+    [[nodiscard]] bool valid() const noexcept { return dir_ != nullptr; }
+};
+
+class BlkidCacheGuard {
+    blkid_cache cache_ = nullptr;
+
+public:
+    BlkidCacheGuard() noexcept = default;
+    ~BlkidCacheGuard() noexcept { if (cache_) blkid_put_cache(cache_); }
+
+    BlkidCacheGuard(const BlkidCacheGuard &) = delete;
+    BlkidCacheGuard &operator=(const BlkidCacheGuard &) = delete;
+
+    [[nodiscard]] Error init() noexcept
     {
-        std::string bootdev_str;
-        bootdev_str.reserve(16);
-
-        if (std::getline(bootdev, bootdev_str))
-        {
-            // trim whitespace from both ends
-            bootdev_str.erase(0, bootdev_str.find_first_not_of(" \t\r\n"));
-            bootdev_str.erase(bootdev_str.find_last_not_of(" \t\r\n") + 1);
-            // convert to lowercase
-            std::transform(bootdev_str.begin(), bootdev_str.end(), bootdev_str.begin(),
-                           [](unsigned char c)
-                           { return std::tolower(c); });
-
-            if (bootdev_str.find("nand") != std::string::npos)
-            {
-                this->mem_type = MemType::NAND;
-                this->boot_device = bootdev_str;
-                // continue to parse /proc/cmdline for exact device (ubiblockX_Y, etc.)
-            }
-            else
-            {
-                // mmc1 -> mmcblk0, mmc2 -> mmcblk1 mmc3 -> mmcblk2
-                if (bootdev_str.find("mmc1") != std::string::npos)
-                {
-                    bootdev_str = "mmcblk0";
-                }
-                else if (bootdev_str.find("mmc2") != std::string::npos)
-                {
-                    bootdev_str = "mmcblk1";
-                }
-                else if (bootdev_str.find("mmc3") != std::string::npos)
-                {
-                    bootdev_str = "mmcblk2";
-                }
-                else
-                {
-                    throw(ErrorDeterminePersistentMemory());
-                }
-                this->mem_type = MemType::eMMC;
-                this->boot_device = bootdev_str;
-                return; // Successfully read the line
-            }
+        if (blkid_get_cache(&cache_, nullptr) != 0) {
+            return Error::blkid_failed;
         }
+        return Error::none;
     }
 
-    // Fallback to parsing /proc/cmdline if /sys/bdinfo/boot_dev is not available
-    std::ifstream cmdline("/proc/cmdline");
+    [[nodiscard]] blkid_cache get() const noexcept { return cache_; }
+};
 
-    if (!cmdline) {
-        throw ErrorOpenKernelParam("Cannot open /proc/cmdline");
+} // anonymous namespace
+
+Error PersistentMemDetector::PersistentMemDetector::detect_from_bdinfo() noexcept
+{
+    std::string bootdev_str;
+    const Error err = posix_utils::read_file_to_string("/sys/bdinfo/boot_dev", bootdev_str);
+    if (err != Error::none) {
+        return err;
     }
 
+    const auto trimmed = string_utils::trim(bootdev_str);
+    const auto lower = string_utils::to_lower(trimmed);
+
+    if (lower.find("nand") != std::string::npos) {
+        mem_type_ = MemType::NAND;
+        boot_device_ = lower;
+        return Error::none;
+    }
+
+    if (lower.find("mmc1") != std::string::npos) {
+        boot_device_ = "mmcblk0";
+    } else if (lower.find("mmc2") != std::string::npos) {
+        boot_device_ = "mmcblk1";
+    } else if (lower.find("mmc3") != std::string::npos) {
+        boot_device_ = "mmcblk2";
+    } else {
+        return Error::memory_detect_failed;
+    }
+
+    mem_type_ = MemType::eMMC;
+    return Error::none;
+}
+
+Error PersistentMemDetector::PersistentMemDetector::detect_from_cmdline() noexcept
+{
     std::string kernel_cmd;
-
-    if (!std::getline(cmdline, kernel_cmd))
-    {
-        throw ErrorOpenKernelParam("Cannot read /proc/cmdline");
+    const Error err = posix_utils::read_file_to_string("/proc/cmdline", kernel_cmd);
+    if (err != Error::none) {
+        LOG_ERROR("cannot read /proc/cmdline");
+        return Error::memory_detect_failed;
     }
 
-    std::smatch device_match;
+    std::string device;
+    if (detail::parse_emmc_device(kernel_cmd, device)) {
+        mem_type_ = MemType::eMMC;
+        boot_device_ = device;
+        return Error::none;
+    }
 
-    if (std::regex_search(kernel_cmd, device_match, this->emmc_memory))
-    {
-        this->mem_type = MemType::eMMC;
-        this->boot_device = device_match[1].str();
+    if (detail::parse_nand_device(kernel_cmd, device)) {
+        mem_type_ = MemType::NAND;
+        boot_device_ = device;
+        return Error::none;
     }
-    else if (std::regex_search(kernel_cmd, device_match, this->nand_memory))
-    {
-        this->mem_type = MemType::NAND;
-        this->boot_device = device_match[1].str();
-    }
-    else
-    {
-        throw(ErrorDeterminePersistentMemory());
-    }
+
+    LOG_ERROR("persistent memory could not be determined from cmdline");
+    return Error::memory_detect_failed;
 }
 
-PersistentMemDetector::PersistentMemDetector::~PersistentMemDetector()
+// Detection order: /sys/bdinfo (vendor sysfs) first, /proc/cmdline fallback.
+// For NAND via bdinfo, cmdline is still needed for the exact ubiblock device.
+Error PersistentMemDetector::PersistentMemDetector::create(PersistentMemDetector &out) noexcept
 {
-}
+    out.path_to_mountpoint_ = config::persistent_memory_mountpoint;
+    out.mem_type_ = MemType::None;
 
-PersistentMemDetector::MemType PersistentMemDetector::PersistentMemDetector::getMemType() const
-{
-    return this->mem_type;
-}
-
-std::string PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDevice(
-    const std::shared_ptr<UBoot> &uboot_handler) const
-{
-    /* use device volume or partition name to find device */
-    const char *label = PERSISTMEMORY_DEVICE_NAME;
-    std::string storage_name;
-
-    if (this->mem_type == MemType::eMMC)
-    {
-        blkid_cache cache = NULL;
-        blkid_dev dev = NULL;
-        if (blkid_get_cache(&cache, NULL) == 0)
-        {
-            dev = blkid_find_dev_with_tag(cache, "LABEL", label);
-            if (dev)
-            {
-                const char *devname = blkid_dev_devname(dev);
-                //std::cout << "Device name for label '" << label << "': " << devname << std::endl;
-                return std::string(devname);
-            }
-        }
-        storage_name = "Partition";
-    }
-    else if (this->mem_type == MemType::NAND)
-    {
-        /* is sysfs exists*/
-        if(!std::filesystem::exists("/sys")) {
-            throw std::runtime_error("sysfs is not mounted or /sys does not exist.");
-        }
-
-        if(!this->boot_device.empty())
-        {
-            // Extract UBI device number from boot_device (e.g., "ubiblock0_0" -> "0")
-            std::string ubi_num;
-            for (char c : this->boot_device) {
-                if (std::isdigit(c)) {
-                    ubi_num += c;
-                } else if (!ubi_num.empty()) {
-                    break;
-                }
-            }
-
-            if (ubi_num.empty()) {
-                std::cerr << "Cannot extract UBI device number from: " << this->boot_device << std::endl;
-                throw ErrorDeterminePersistentMemory();
-            }
-
-            std::string ubi_dev = "ubi" + ubi_num;
-            fs::path found_ubi_device_path = fs::path("/sys/class/ubi") / ubi_dev;
-
-            if(std::filesystem::exists(found_ubi_device_path))
-            {
-                try
-                {
-                    // Iterate through all ubi0_X directories
-                    for (const auto &entry : fs::directory_iterator(found_ubi_device_path))
-                    {
-                        std::string dirname = entry.path().filename().string();
-
-                        // Filter: only ubi0_0, ubi0_1, ubi0_2, etc.
-                        if (dirname.find(ubi_dev + "_") != 0)
-                        {
-                            continue;
-                        }
-
-                        fs::path name_file = entry.path() / "name";
-                        if (!fs::exists(name_file))
-                        {
-                            continue;
-                        }
-
-                        // Read volume name
-                        std::ifstream name_stream(name_file);
-                        std::string vol_name;
-                        if (!std::getline(name_stream, vol_name))
-                        {
-                            continue;
-                        }
-
-                        // Trim whitespace
-                        auto trim_start = vol_name.find_first_not_of(" \t\n\r");
-                        auto trim_end = vol_name.find_last_not_of(" \t\n\r");
-
-                        if (trim_start != std::string::npos)
-                        {
-                            vol_name = vol_name.substr(trim_start, trim_end - trim_start + 1);
-                        }
-
-                        //std::cout << "Volume " << dirname << ": " << vol_name << std::endl;
-
-                        if (vol_name == label)
-                        {
-                            std::string device = "/dev/" + dirname;
-                            //std::cout << "Found UBI volume '" << label << "': " << device << std::endl;
-                            return device;
-                        }
-                    }
-                }
-                catch (const std::exception &e)
-                {
-                    std::cerr << "Error: UBI volumes not found in sysfs." << std::endl;
+    // Try bdinfo first
+    Error err = out.detect_from_bdinfo();
+    if (err == Error::none) {
+        // For NAND detected via bdinfo, we still need cmdline for exact device
+        if (out.mem_type_ == MemType::NAND) {
+            // boot_device_ has bdinfo value, try to get exact ubiblock from cmdline
+            std::string kernel_cmd;
+            if (posix_utils::read_file_to_string("/proc/cmdline", kernel_cmd) == Error::none) {
+                std::string nand_dev;
+                if (detail::parse_nand_device(kernel_cmd, nand_dev)) {
+                    out.boot_device_ = nand_dev;
                 }
             }
         }
-        storage_name = "Volume";
+        return Error::none;
     }
 
-    std::cerr << storage_name << " '" << label << "' not found." << std::endl;
-    throw ErrorDeterminePersistentMemory();
+    // Fallback to cmdline parsing
+    return out.detect_from_cmdline();
 }
 
-std::string PersistentMemDetector::PersistentMemDetector::getBootDevice() const
+PersistentMemDetector::MemType
+PersistentMemDetector::PersistentMemDetector::getMemType() const noexcept
 {
-    return this->boot_device;
+    return mem_type_;
 }
 
-std::filesystem::path PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDeviceMountPoint() const
+Error PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDevice(
+    const UBoot & /*uboot*/, std::string &out) const noexcept
 {
-    return this->path_to_mountpoint;
+    const char *label = config::persistmemory_device_name;
+
+    if (mem_type_ == MemType::eMMC) {
+        BlkidCacheGuard cache;
+        if (cache.init() != Error::none) {
+            LOG_ERROR("blkid cache init failed");
+            return Error::blkid_failed;
+        }
+
+        blkid_dev dev = blkid_find_dev_with_tag(cache.get(), "LABEL", label);
+        if (dev != nullptr) {
+            const char *devname = blkid_dev_devname(dev);
+            if (devname != nullptr) {
+                out = std::string(devname);
+                return Error::none;
+            }
+        }
+
+        LOG_ERROR(std::string("partition '") + label + "' not found");
+        return Error::memory_detect_failed;
+    }
+
+    if (mem_type_ == MemType::NAND) {
+        if (!posix_utils::path_exists("/sys")) {
+            LOG_ERROR("sysfs not mounted");
+            return Error::memory_detect_failed;
+        }
+
+        if (boot_device_.empty()) {
+            LOG_ERROR("boot device not set for NAND");
+            return Error::memory_detect_failed;
+        }
+
+        // Extract UBI device number from boot_device (e.g., "ubiblock0_0" -> "0")
+        std::string ubi_num;
+        for (char c : boot_device_) {
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                ubi_num += c;
+            } else if (!ubi_num.empty()) {
+                break;
+            }
+        }
+
+        if (ubi_num.empty()) {
+            LOG_ERROR("cannot extract UBI device number from: " + boot_device_);
+            return Error::memory_detect_failed;
+        }
+
+        const std::string ubi_dev = "ubi" + ubi_num;
+        const std::string ubi_path = "/sys/class/ubi/" + ubi_dev;
+
+        if (!posix_utils::path_exists(ubi_path)) {
+            LOG_ERROR("UBI device path not found: " + ubi_path);
+            return Error::memory_detect_failed;
+        }
+
+        DirGuard dir(::opendir(ubi_path.c_str()));
+        if (!dir.valid()) {
+            LOG_ERRNO("opendir failed", errno);
+            return Error::memory_detect_failed;
+        }
+
+        const std::string prefix = ubi_dev + "_";
+        struct dirent *entry = nullptr;
+        while ((entry = ::readdir(dir.get())) != nullptr) {
+            const std::string_view dirname(entry->d_name);
+            if (dirname.substr(0, prefix.size()) != prefix) {
+                continue;
+            }
+
+            const std::string name_file = ubi_path + "/" + std::string(dirname) + "/name";
+            std::string vol_name;
+            if (posix_utils::read_file_to_string(name_file, vol_name) != Error::none) {
+                continue;
+            }
+
+            // Trim whitespace
+            const auto sv = string_utils::trim(std::string_view(vol_name));
+            if (sv == label) {
+                out = "/dev/" + std::string(dirname);
+                return Error::none;
+            }
+        }
+
+        LOG_ERROR(std::string("UBI volume '") + label + "' not found");
+        return Error::memory_detect_failed;
+    }
+
+    LOG_ERROR("memory type not determined");
+    return Error::memory_detect_failed;
+}
+
+std::string_view PersistentMemDetector::PersistentMemDetector::getBootDevice() const noexcept
+{
+    return boot_device_;
+}
+
+std::string_view PersistentMemDetector::PersistentMemDetector::getPathToPersistentMemoryDeviceMountPoint() const noexcept
+{
+    return path_to_mountpoint_;
 }
