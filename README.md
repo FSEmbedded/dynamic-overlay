@@ -8,7 +8,7 @@ Runs before any init system. Detects boot storage, mounts the active application
 squashfs image (A/B slot selection via U-Boot), and applies overlay filesystems
 defined in `overlay.ini`.
 
-See [Boot Sequence](documentation/diagrams/boot_sequence.md) for the full
+See [Boot Sequence](docs/diagrams/boot_sequence.md) for the full
 step-by-step flow.
 
 ## Build
@@ -57,7 +57,7 @@ mergedir=/etc
 - **ApplicationFolder** entries create read-only overlays (app content over system)
 - **PersistentMemory** sections create read-write overlays (changes survive reboots)
 
-Full reference: [overlay.ini Reference](documentation/overlay_ini_reference.md)
+Full reference: [overlay.ini Reference](docs/overlay_ini_reference.md)
 
 ### U-Boot Variables
 
@@ -72,12 +72,12 @@ Full reference: [overlay.ini Reference](documentation/overlay_ini_reference.md)
 
 | Document | Content |
 |----------|---------|
-| [Architecture](documentation/architecture.md) | Module design, error handling, build config |
-| [overlay.ini Reference](documentation/overlay_ini_reference.md) | Configuration file format |
-| [Boot Sequence](documentation/diagrams/boot_sequence.md) | Step-by-step preinit flow |
-| [Component Architecture](documentation/diagrams/component_architecture.md) | Module dependency diagram |
-| [Mount Sequence](documentation/diagrams/mount_sequence.md) | Overlay processing flow |
-| [Directory Layout](documentation/diagrams/directory_layout.md) | Filesystem tree |
+| [Architecture](docs/architecture.md) | Module design, error handling, build config |
+| [overlay.ini Reference](docs/overlay_ini_reference.md) | Configuration file format |
+| [Boot Sequence](docs/diagrams/boot_sequence.md) | Step-by-step preinit flow |
+| [Component Architecture](docs/diagrams/component_architecture.md) | Module dependency diagram |
+| [Mount Sequence](docs/diagrams/mount_sequence.md) | Overlay processing flow |
+| [Directory Layout](docs/diagrams/directory_layout.md) | Filesystem tree |
 
 ## Troubleshooting
 
