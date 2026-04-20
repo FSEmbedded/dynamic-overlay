@@ -27,10 +27,8 @@ EOF
 # X.509 certificate store CMake arguments
 X509_CMAKE_ARGS=(
     -DBUILD_X509_CERTIFICATE_STORE_MOUNT=ON
-    -DTARGET_ARCHIV_DIR_PATH=/etc/adu/certs
+    -DTARGET_ARCHIV_DIR_PATH=/etc/adu/x509_c
     -DFUS_AZURE_CONFIGURATION=/etc/adu/du-config.json
-    -DFUS_AZURE_CERT_CERTIFICATE_NAME=device_cert.pem
-    -DFUS_AZURE_CERT_KEY_NAME=device_key.pem
     -DPART_NAME_MTD_CERT=Secure
     -DEMMC_SECURE_PART_BLK_NR=22528
 )

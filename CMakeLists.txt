@@ -65,8 +65,6 @@ set(NAND_UBOOT_ENV_PATH "/etc/fw_env.config.nand" CACHE STRING "NAND U-Boot envi
 if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     set(TARGET_ARCHIV_DIR_PATH           "" CACHE STRING "X.509 certificate target directory (tmpfs mount point)")
     set(FUS_AZURE_CONFIGURATION          "" CACHE STRING "Azure DU config path")
-    set(FUS_AZURE_CERT_CERTIFICATE_NAME  "" CACHE STRING "Azure certificate name")
-    set(FUS_AZURE_CERT_KEY_NAME          "" CACHE STRING "Azure certificate key name")
     set(PART_NAME_MTD_CERT               "" CACHE STRING "MTD certificate partition name")
     set(EMMC_SECURE_PART_BLK_NR          "" CACHE STRING "eMMC secure partition block number")
 
@@ -74,8 +72,6 @@ if(BUILD_X509_CERTIFICATE_STORE_MOUNT)
     foreach(_var
         TARGET_ARCHIV_DIR_PATH
         FUS_AZURE_CONFIGURATION
-        FUS_AZURE_CERT_CERTIFICATE_NAME
-        FUS_AZURE_CERT_KEY_NAME
         PART_NAME_MTD_CERT
         EMMC_SECURE_PART_BLK_NR
     )

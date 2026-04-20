@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <string_view>
 
-#include <json/json.h>
+extern "C" {
+#include <sys/types.h>
+}
 
 // Optional x509 certificate store — conditionally compiled with --x509.
 // Extracts certs from Secure partition (NAND MTD or eMMC block offset)
@@ -37,11 +39,13 @@ namespace x509_store
     class CertStore
     {
     protected:
-        Json::Value root_;
-
-        [[nodiscard]] Error load_json_config() noexcept;
-        [[nodiscard]] Error save_json_config() noexcept;
-        [[nodiscard]] Error parseDuJsonConfig(bool &config_updated) noexcept;
+        // Validate the staged du-config.json (archive-sourced) and copy it
+        // to config::fus_azure_configuration (overlayfs). The archive is the
+        // single source of truth for device identity; the rootfs ships only
+        // a stub with empty device_id/iotHubName. Pass (uid_t)-1 / (gid_t)-1
+        // to leave ownership untouched.
+        [[nodiscard]] Error promoteDuJsonConfig(std::string_view staged_config_path,
+                                                 uid_t uid, gid_t gid) noexcept;
 
     public:
         CertStore() noexcept = default;
@@ -51,8 +55,6 @@ namespace x509_store
         CertStore &operator=(const CertStore &) = delete;
         CertStore(CertStore &&) = delete;
         CertStore &operator=(CertStore &&) = delete;
-
-        [[nodiscard]] Error init() noexcept;
     };
 
     [[nodiscard]] Error extract_archive(std::string_view archive_path,
@@ -70,7 +72,7 @@ namespace x509_store
         CertMDTstore() noexcept = default;
         ~CertMDTstore() noexcept = default;
 
-        [[nodiscard]] Error ExtractCertStore() noexcept;
+        [[nodiscard]] Error ExtractCertStore(uid_t uid, gid_t gid) noexcept;
 
         CertMDTstore(const CertMDTstore &) = delete;
         CertMDTstore &operator=(const CertMDTstore &) = delete;
@@ -84,7 +86,8 @@ namespace x509_store
         CertMMCstore() noexcept = default;
         ~CertMMCstore() noexcept = default;
 
-        [[nodiscard]] Error ExtractCertStore(std::string_view bootdevice) noexcept;
+        [[nodiscard]] Error ExtractCertStore(std::string_view bootdevice,
+                                              uid_t uid, gid_t gid) noexcept;
 
         CertMMCstore(const CertMMCstore &) = delete;
         CertMMCstore &operator=(const CertMMCstore &) = delete;

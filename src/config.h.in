@@ -39,8 +39,6 @@ inline constexpr const char *nand_uboot_env_path = "@NAND_UBOOT_ENV_PATH@";
 // X.509 certificate store
 inline constexpr const char *target_archiv_dir_path = "@TARGET_ARCHIV_DIR_PATH@";
 inline constexpr const char *fus_azure_configuration = "@FUS_AZURE_CONFIGURATION@";
-inline constexpr const char *fus_azure_cert_certificate_name = "@FUS_AZURE_CERT_CERTIFICATE_NAME@";
-inline constexpr const char *fus_azure_cert_key_name = "@FUS_AZURE_CERT_KEY_NAME@";
 inline constexpr const char *part_name_mtd_cert = "@PART_NAME_MTD_CERT@";
 inline constexpr uint32_t emmc_secure_part_blk_nr = @EMMC_SECURE_PART_BLK_NR@;
 #endif

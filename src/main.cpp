@@ -176,9 +176,42 @@ int main()
         Mount cert_mount;
         bool cert_tmpfs_mounted = false;
 
+        // Resolve adu uid/gid up-front so tmpfs is owned correctly from the
+        // start — avoids a window where the dir is root:root before chown.
+        const struct passwd *const adu_pwd = ::getpwnam("adu");
+        const struct group *const adu_grp = ::getgrnam("adu");
+
+        std::string mount_opts = "size=256K";
+        if (adu_pwd != nullptr && adu_grp != nullptr) {
+            mount_opts += ",uid=" + std::to_string(adu_pwd->pw_uid)
+                        + ",gid=" + std::to_string(adu_grp->gr_gid)
+                        + ",mode=0750";
+        } else {
+            LOG_WARNING("user/group 'adu' not found — tmpfs mounted without owner restrictions");
+        }
+
+        const uid_t adu_uid = (adu_pwd != nullptr) ? adu_pwd->pw_uid : static_cast<uid_t>(-1);
+        const gid_t adu_gid = (adu_grp != nullptr) ? adu_grp->gr_gid : static_cast<gid_t>(-1);
+
         Error cert_err = posix_utils::mkdir_p(cert_dir);
         if (cert_err == Error::none) {
-            cert_err = cert_mount.wrapper_c_mount("none", cert_dir, "size=1M", "tmpfs", 0);
+            // Chown the tmpfs parent (e.g. /etc/adu) so the ADU agent can
+            // traverse it and read the promoted du-config.json. mkdir_p may
+            // have created it in the overlay-upper as root:root 0755; the
+            // agent's CheckConfDirOwnershipAndPermissions requires 0750.
+            const auto slash = cert_dir.rfind('/');
+            if (slash != std::string::npos && slash > 0) {
+                const std::string parent = cert_dir.substr(0, slash);
+                if (::lchown(parent.c_str(), adu_uid, adu_gid) != 0) {
+                    LOG_ERRNO("chown of tmpfs parent failed", errno);
+                }
+                if (::chmod(parent.c_str(), 0750) != 0) {
+                    LOG_ERRNO("chmod of tmpfs parent failed", errno);
+                }
+            }
+
+            cert_err = cert_mount.wrapper_c_mount("none", cert_dir, mount_opts, "tmpfs",
+                MS_NOSUID | MS_NODEV | MS_NOEXEC);
             if (cert_err == Error::none) {
                 cert_tmpfs_mounted = true;
             }
@@ -187,25 +220,24 @@ int main()
         if (cert_err == Error::none) {
             if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC) {
                 x509_store::CertMMCstore cert_store;
-                cert_err = cert_store.ExtractCertStore(mem_dect.getBootDevice());
+                cert_err = cert_store.ExtractCertStore(mem_dect.getBootDevice(), adu_uid, adu_gid);
             } else if (mem_dect.getMemType() == PersistentMemDetector::MemType::NAND) {
                 x509_store::CertMDTstore cert_store;
-                cert_err = cert_store.ExtractCertStore();
+                cert_err = cert_store.ExtractCertStore(adu_uid, adu_gid);
             }
         }
 
         if (cert_err == Error::none) {
-            struct passwd *pwd = ::getpwnam("adu");
-            struct group *grp = ::getgrnam("adu");
-            if (pwd && grp) {
-                static_cast<void>(chown_recursive(cert_dir, pwd->pw_uid, grp->gr_gid));
-            } else {
-                LOG_WARNING("user/group 'adu' not found");
+            // Belt-and-braces: files created during extraction may inherit root
+            // ownership; normalise to adu:adu before freezing.
+            if (adu_pwd != nullptr && adu_grp != nullptr) {
+                static_cast<void>(chown_recursive(cert_dir, adu_uid, adu_gid));
             }
 
             // Freeze: remount readonly
             static_cast<void>(cert_mount.wrapper_c_mount(
-                "none", cert_dir, "", "tmpfs", MS_REMOUNT | MS_RDONLY));
+                "none", cert_dir, "", "tmpfs",
+                MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC));
         } else if (cert_tmpfs_mounted) {
             LOG_WARNING("cert store failed: " + std::string(error_to_string(cert_err)));
             static_cast<void>(cert_mount.wrapper_c_umount(cert_dir));

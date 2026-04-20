@@ -9,6 +9,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <json/json.h>
 
 extern "C" {
 #include <fcntl.h>
@@ -20,70 +21,102 @@ namespace {
 inline constexpr uint32_t MAX_NR_MTD_DEVICES = 128;
 inline constexpr std::size_t CERT_BUF_SIZE = 1024;
 inline constexpr int DEFAULT_SECTOR_SIZE = 512;
+// Archive-size limits: a single PEM cert/key plus a small JSON never exceeds
+// this. Cap is defense against tampered or corrupted Secure-partition input.
+inline constexpr la_int64_t MAX_ENTRY_BYTES    = 64  * 1024;   // 64 KiB
+inline constexpr std::size_t MAX_ARCHIVE_BYTES = 128 * 1024;   // 128 KiB
 } // anonymous namespace
 
-Error x509_store::CertStore::load_json_config() noexcept
+namespace {
+
+// Reject any byte that could be used to escape the expected cert dir.
+// Whitelist: alnum, '.', '-', '_'. Anything else (including '/', '\0', '..')
+// is rejected.
+[[nodiscard]] bool is_safe_basename(std::string_view s) noexcept
 {
-    if (!posix_utils::path_exists(config::fus_azure_configuration)) {
-        LOG_ERROR("azure config not found: " + std::string(config::fus_azure_configuration));
-        return Error::config_not_found;
+    if (s.empty() || s.size() > 128) { return false; }
+    if (s == "." || s == "..") { return false; }
+    for (const char c : s) {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                     || (c >= '0' && c <= '9')
+                     || c == '.' || c == '-' || c == '_';
+        if (!ok) { return false; }
+    }
+    return true;
+}
+
+} // anonymous namespace
+
+Error x509_store::CertStore::promoteDuJsonConfig(std::string_view staged_config_path,
+                                                   uid_t uid, gid_t gid) noexcept
+{
+    std::string content;
+    Error err = posix_utils::read_file_to_string(staged_config_path, content);
+    if (err != Error::none) {
+        LOG_ERROR("staged du-config.json not readable: " + std::string(staged_config_path));
+        return err;
     }
 
-    std::string content;
-    Error err = posix_utils::read_file_to_string(config::fus_azure_configuration, content);
+    Json::Value root;
+    {
+        Json::CharReaderBuilder reader;
+        std::string errs;
+        std::unique_ptr<Json::CharReader> parser(reader.newCharReader());
+        if (!parser->parse(content.data(), content.data() + content.size(), &root, &errs)) {
+            LOG_ERROR("staged du-config.json parse error: " + errs);
+            return Error::json_parse_failed;
+        }
+    }
+
+    // Archive is authoritative, but trust-but-verify: pin the container path
+    // and reject unsafe filenames so a tampered archive cannot redirect the
+    // agent to read from somewhere outside the tmpfs.
+    const Json::Value &src = root["agents"][0]["connectionSource"];
+    if (src["connectionType"].asString() != "x509") {
+        LOG_WARNING("staged du-config.json not x509, skipping promote");
+        return Error::config_invalid;
+    }
+    if (src["device_id"].asString().empty()) {
+        LOG_ERROR("staged du-config.json has empty device_id");
+        return Error::config_invalid;
+    }
+    if (src["iotHubName"].asString().empty()) {
+        LOG_ERROR("staged du-config.json has empty iotHubName");
+        return Error::config_invalid;
+    }
+    if (src["x509_container"].asString() != std::string(config::target_archiv_dir_path)) {
+        LOG_ERROR("staged du-config.json x509_container does not match pinned path");
+        return Error::config_invalid;
+    }
+    if (!is_safe_basename(src["x509_cert"].asString())
+        || !is_safe_basename(src["x509_key"].asString())) {
+        LOG_ERROR("staged du-config.json has unsafe x509_cert or x509_key name");
+        return Error::config_invalid;
+    }
+
+    // Atomic publish: write-to-tmp + rename + sync. Crash during write leaves
+    // the previous du-config.json intact; never a truncated JSON on disk.
+    const std::string final_path(config::fus_azure_configuration);
+    const std::string tmp_path = final_path + ".tmp";
+
+    err = posix_utils::write_string_to_file(tmp_path, content, 0640);
     if (err != Error::none) {
         return err;
     }
 
-    Json::CharReaderBuilder reader;
-    std::string errs;
-    std::unique_ptr<Json::CharReader> parser(reader.newCharReader());
-    if (!parser->parse(content.data(), content.data() + content.size(), &root_, &errs)) {
-        LOG_ERROR("JSON parse error: " + errs);
-        return Error::json_parse_failed;
+    err = posix_utils::rename_file(tmp_path, final_path);
+    if (err != Error::none) {
+        static_cast<void>(posix_utils::remove_file(tmp_path));
+        return err;
     }
 
-    return Error::none;
-}
-
-Error x509_store::CertStore::save_json_config() noexcept
-{
-    Json::StreamWriterBuilder builder;
-    const std::string json_str = Json::writeString(builder, root_);
-    return posix_utils::write_string_to_file(config::fus_azure_configuration, json_str);
-}
-
-Error x509_store::CertStore::init() noexcept
-{
-    return load_json_config();
-}
-
-Error x509_store::CertStore::parseDuJsonConfig(bool &config_updated) noexcept
-{
-    config_updated = false;
-
-    if (root_["agents"][0]["connectionSource"]["connectionType"].asString() != "x509") {
-        LOG_WARNING("no x509 configuration in du-config.json, skipping cert store");
-        return Error::config_invalid;
+    // The ADU agent runs as adu:adu and must read this file (mode 0640).
+    // write_string_to_file creates it as root:root, so normalise ownership.
+    if (::lchown(final_path.c_str(), uid, gid) != 0) {
+        LOG_ERRNO("promoteDuJsonConfig: lchown failed", errno);
     }
 
-    const std::string x509_cert = root_["agents"][0]["connectionSource"]["x509_cert"].asString();
-    const std::string x509_key = root_["agents"][0]["connectionSource"]["x509_key"].asString();
-    const std::string x509_container = root_["agents"][0]["connectionSource"]["x509_container"].asString();
-
-    if (x509_cert != std::string(config::fus_azure_cert_certificate_name)) {
-        root_["agents"][0]["connectionSource"]["x509_cert"] = std::string(config::fus_azure_cert_certificate_name);
-        config_updated = true;
-    }
-    if (x509_key != std::string(config::fus_azure_cert_key_name)) {
-        root_["agents"][0]["connectionSource"]["x509_key"] = std::string(config::fus_azure_cert_key_name);
-        config_updated = true;
-    }
-    if (x509_container != std::string(config::target_archiv_dir_path)) {
-        root_["agents"][0]["connectionSource"]["x509_container"] = std::string(config::target_archiv_dir_path);
-        config_updated = true;
-    }
-
+    ::sync();
     return Error::none;
 }
 
@@ -146,11 +179,18 @@ Error x509_store::extract_archive(std::string_view archive_path,
     ArchiveWritePtr writer(archive_write_disk_new());
     if (!writer) { return Error::cert_store_failed; }
 
+    // Writer-level defence in depth: refuse ".." escapes and symlink traversal,
+    // refuse to overwrite existing files. Belt-and-braces alongside our own
+    // pathname filter below.
     archive_write_disk_set_options(writer.get(),
-        ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL | ARCHIVE_EXTRACT_FFLAGS);
+        ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL
+        | ARCHIVE_EXTRACT_FFLAGS
+        | ARCHIVE_EXTRACT_SECURE_NODOTDOT | ARCHIVE_EXTRACT_SECURE_SYMLINKS
+        | ARCHIVE_EXTRACT_NO_OVERWRITE);
 
     const std::string dest(dest_dir);
     struct archive_entry *entry = nullptr;
+    std::size_t total_bytes = 0;
 
     for (;;) {
         const int r = archive_read_next_header(reader.get(), &entry);
@@ -158,6 +198,12 @@ Error x509_store::extract_archive(std::string_view archive_path,
         if (r != ARCHIVE_OK) {
             LOG_ERROR("archive header error: " + std::string(archive_error_string(reader.get())));
             return Error::cert_store_failed;
+        }
+
+        // Only regular files allowed — no symlinks, devices, FIFOs etc.
+        if (archive_entry_filetype(entry) != AE_IFREG) {
+            LOG_WARNING("skipping non-regular archive entry");
+            continue;
         }
 
         // Validate archive entry path before extraction
@@ -169,7 +215,45 @@ Error x509_store::extract_archive(std::string_view archive_path,
             continue;
         }
 
-        const std::string full_path = dest + "/" + entry_path;
+        // Strip "x509_c/" prefix if present: the archive wraps certs in that
+        // subdir for build-time convenience, but tmpfs is already mounted at
+        // the cert directory, so flatten at extraction time.
+        std::string_view rel(entry_path);
+        constexpr std::string_view kCertSubdir{"x509_c/"};
+        if (rel.size() >= kCertSubdir.size()
+            && rel.substr(0, kCertSubdir.size()) == kCertSubdir) {
+            rel.remove_prefix(kCertSubdir.size());
+        }
+        if (rel.empty() || rel.find('/') != std::string_view::npos) {
+            LOG_WARNING("skipping nested archive entry: " + std::string(entry_path));
+            continue;
+        }
+
+        // Name whitelist: du-config.json, *.cert.pem, *.key.pem only.
+        const auto ends_with = [](std::string_view s, std::string_view suf) noexcept {
+            return s.size() >= suf.size()
+                && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+        };
+        if (rel != "du-config.json"
+            && !ends_with(rel, ".cert.pem")
+            && !ends_with(rel, ".key.pem")) {
+            LOG_WARNING("skipping archive entry outside whitelist: " + std::string(rel));
+            continue;
+        }
+
+        // Size caps: reject oversize entries and enforce cumulative budget.
+        const la_int64_t entry_size = archive_entry_size(entry);
+        if (entry_size < 0 || entry_size > MAX_ENTRY_BYTES) {
+            LOG_ERROR("archive entry exceeds per-entry size cap");
+            return Error::cert_store_failed;
+        }
+        if (total_bytes + static_cast<std::size_t>(entry_size) > MAX_ARCHIVE_BYTES) {
+            LOG_ERROR("archive exceeds total size cap");
+            return Error::cert_store_failed;
+        }
+        total_bytes += static_cast<std::size_t>(entry_size);
+
+        const std::string full_path = dest + "/" + std::string(rel);
         archive_entry_set_pathname(entry, full_path.c_str());
 
         if (archive_write_header(writer.get(), entry) != ARCHIVE_OK) {
@@ -177,7 +261,7 @@ Error x509_store::extract_archive(std::string_view archive_path,
             return Error::write_failed;
         }
 
-        if (archive_entry_size(entry) > 0) {
+        if (entry_size > 0) {
             const Error err = copy_archive_data(reader.get(), writer.get());
             if (err != Error::none) { return err; }
         }
@@ -250,15 +334,8 @@ int x509_store::CertMDTstore::ScanForPartition(std::string_view part_name) noexc
     return -1;
 }
 
-Error x509_store::CertMDTstore::ExtractCertStore() noexcept
+Error x509_store::CertMDTstore::ExtractCertStore(uid_t uid, gid_t gid) noexcept
 {
-    Error err = init();
-    if (err != Error::none) return err;
-
-    bool config_updated = false;
-    err = parseDuJsonConfig(config_updated);
-    if (err != Error::none) return err;
-
     if (ScanForPartition(config::part_name_mtd_cert) != 0) {
         LOG_ERROR("MTD partition not found: " + std::string(config::part_name_mtd_cert));
         return Error::cert_store_failed;
@@ -323,31 +400,27 @@ Error x509_store::CertMDTstore::ExtractCertStore() noexcept
         return Error::read_failed;
     }
 
-    err = extract_archive(temp_archive, config::target_archiv_dir_path);
-
+    Error err = extract_archive(temp_archive, config::target_archiv_dir_path);
     if (err != Error::none) {
         return err;
     }
 
-    if (config_updated) {
-        const Error save_err = save_json_config();
-        if (save_err != Error::none) {
-            LOG_WARNING("failed to save du-config.json");
-        }
+    const std::string staged_config = std::string(config::target_archiv_dir_path) + "/du-config.json";
+    ScopeGuard cleanup_staged([&staged_config]() {
+        static_cast<void>(posix_utils::remove_file(staged_config));
+    });
+
+    err = promoteDuJsonConfig(staged_config, uid, gid);
+    if (err != Error::none) {
+        return err;
     }
 
     return Error::none;
 }
 
-Error x509_store::CertMMCstore::ExtractCertStore(std::string_view bootdevice) noexcept
+Error x509_store::CertMMCstore::ExtractCertStore(std::string_view bootdevice,
+                                                   uid_t uid, gid_t gid) noexcept
 {
-    Error err = init();
-    if (err != Error::none) return err;
-
-    bool config_updated = false;
-    err = parseDuJsonConfig(config_updated);
-    if (err != Error::none) return err;
-
     const std::string path_to_update_image = "/dev/" + std::string(bootdevice);
     const std::string temp_archive = std::string(config::target_archiv_dir_path) + "/tmp.tar.bz2";
     LOG_INFO("eMMC cert source: " + path_to_update_image
@@ -417,17 +490,19 @@ Error x509_store::CertMMCstore::ExtractCertStore(std::string_view bootdevice) no
 
     LOG_DEBUG("cert store file written: " + temp_archive);
 
-    err = extract_archive(temp_archive, config::target_archiv_dir_path);
-
+    Error err = extract_archive(temp_archive, config::target_archiv_dir_path);
     if (err != Error::none) {
         return err;
     }
 
-    if (config_updated) {
-        const Error save_err = save_json_config();
-        if (save_err != Error::none) {
-            LOG_WARNING("failed to save du-config.json");
-        }
+    const std::string staged_config = std::string(config::target_archiv_dir_path) + "/du-config.json";
+    ScopeGuard cleanup_staged([&staged_config]() {
+        static_cast<void>(posix_utils::remove_file(staged_config));
+    });
+
+    err = promoteDuJsonConfig(staged_config, uid, gid);
+    if (err != Error::none) {
+        return err;
     }
 
     return Error::none;
