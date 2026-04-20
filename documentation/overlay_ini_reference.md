@@ -94,6 +94,7 @@ mergedir=<path>
 | `upperdir` | Yes | path | Upper layer directory (must be on writable filesystem) |
 | `workdir` | Yes | path | Work directory (must be on same filesystem as upperdir) |
 | `mergedir` | Yes | path | Final mount point (visible to system) |
+| `nosuid`   | No  | `true` \| `false` | Whether to mount with `MS_NOSUID` (default: `true`). Set to `false` only when the merge path legitimately hosts setuid binaries from the signed lowerdir (e.g. `/usr/bin`). Any other value rejects the config. |
 
 #### Field Details
 
@@ -119,6 +120,22 @@ mergedir=<path>
 - The final mount point where the overlay becomes visible
 - This is the path applications will use to access the overlaid directory
 - Typically matches one of the lowerdir paths
+
+**nosuid**
+- Controls the `MS_NOSUID` mount flag on the overlay
+- Default is `true` — the overlay ignores setuid/setgid bits on all files in
+  the merged view. Because `upperdir` lives on a user-writable partition,
+  honoring setuid would turn any write into the upperdir into persistent
+  root; the secure default blocks this class of privilege escalation.
+- Set to `false` only when the merge path is expected to host setuid
+  binaries from the signed lowerdir (e.g. `/usr/bin/sudo`). The underlying
+  partition is still mounted `MS_NOSUID`, so an attacker who plants a
+  setuid binary in an upperdir cannot execute it with elevated privileges
+  via the upperdir path — but a `nosuid=false` overlay means a setuid
+  binary written into the upperdir *is* honored when accessed via the
+  merge path. Only opt out for paths you trust.
+- Any value other than `true` / `false` (case-sensitive) is rejected as
+  invalid configuration
 
 #### Example
 
@@ -146,7 +163,8 @@ mergedir=/var/lib
 
 - Section name must match pattern `PersistentMemory.<identifier>`
 - The identifier can be any string (e.g., `etc`, `config`, `myapp`)
-- All four fields are required
+- The four directory fields are required; `nosuid` is optional and
+  defaults to `true`
 - upperdir and workdir must be on the same mounted filesystem
 - Changes written to mergedir are stored in upperdir
 - Original lower layer content is never modified
@@ -183,6 +201,18 @@ lowerdir=/var/log
 upperdir=/rw_fs/root/upperdir/var_log
 workdir=/rw_fs/root/workdir/var_log
 mergedir=/var/log
+
+; Persistent overlay for /usr/bin — opts out of MS_NOSUID so that
+; signed setuid binaries in the lowerdir (e.g. /usr/bin/sudo) keep
+; working. Only do this for paths you trust: a writable upperdir
+; combined with nosuid=false means any binary written there is
+; honored as setuid via the merge path.
+[PersistentMemory.usr_bin]
+lowerdir=/usr/bin
+upperdir=/rw_fs/root/upperdir/usr_bin
+workdir=/rw_fs/root/workdir/usr_bin
+mergedir=/usr/bin
+nosuid=false
 ```
 
 ## Processing Order
@@ -218,6 +248,8 @@ Result: `/etc` ends up as a **persistent read-write overlay** with the applicati
 | overlay.ini not found | Uses fallback: overlay `/etc` and `/usr/bin` only |
 | Invalid section name | Error logged, section skipped |
 | Missing required field | Returns `Error::config_invalid` |
+| Invalid `nosuid` value (not `true`/`false`) | Returns `Error::config_invalid` |
+| Unknown key in `PersistentMemory.*` section | Returns `Error::config_invalid` |
 | Directory doesn't exist | Warning logged, overlay skipped |
 | Mount fails (EBUSY) | Already mounted, continue |
 | Max stacking depth | Warning logged, remaining overlays skipped |

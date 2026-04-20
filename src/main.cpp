@@ -129,7 +129,9 @@ int main()
         if (err == Error::none) {
             persistent_args.source_dir = persistent_device;
             persistent_args.dest_dir = std::string(mem_dect.getPathToPersistentMemoryDeviceMountPoint());
-            persistent_args.flags = 0;
+            // Data partition holds overlay upperdirs and is user-writable.
+            // Direct execution via /rw_fs/root/... is never legitimate; deny it.
+            persistent_args.flags = MS_NOSUID | MS_NODEV;
 
             if (mem_dect.getMemType() == PersistentMemDetector::MemType::eMMC) {
                 persistent_args.filesystem_type = "ext4";

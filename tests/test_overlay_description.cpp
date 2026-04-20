@@ -53,6 +53,26 @@ TEST(PersistentDesc, EqualityOperator) {
     EXPECT_TRUE(a != b);
 }
 
+TEST(PersistentDesc, DefaultNosuidTrue) {
+    OverlayDescription::Persistent desc;
+    EXPECT_TRUE(desc.nosuid);
+}
+
+TEST(PersistentDesc, EqualityIncludesNosuid) {
+    OverlayDescription::Persistent a;
+    a.lower_directory = "/lower";
+    a.upper_directory = "/upper";
+    a.work_directory = "/work";
+    a.merge_directory = "/merge";
+
+    OverlayDescription::Persistent b = a;
+    EXPECT_TRUE(a == b);
+
+    b.nosuid = false;
+    EXPECT_FALSE(a == b);
+    EXPECT_TRUE(a != b);
+}
+
 // --- OverlayDescription::ReadOnly ---
 
 TEST(ReadOnlyDesc, DefaultConstructorEmpty) {

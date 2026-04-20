@@ -2,6 +2,7 @@
 #include "persistent_mem_detector.h"
 #include "posix_utils.h"
 #include "string_utils.h"
+#include "overlay_config.h"
 #include "logging.h"
 
 #include <algorithm>
@@ -118,26 +119,10 @@ Error DynamicMounting::read_and_parse_ini() noexcept
                    section_name.compare(0, persistent_prefix.size(), persistent_prefix) == 0) {
             auto &persistent = overlay_persistent_[section_name];
 
-            for (const auto &[key, value] : section_data) {
-                if (key == "lowerdir") {
-                    persistent.lower_directory = value;
-                } else if (key == "upperdir") {
-                    persistent.upper_directory = value;
-                } else if (key == "workdir") {
-                    persistent.work_directory = value;
-                } else if (key == "mergedir") {
-                    persistent.merge_directory = value;
-                } else {
-                    LOG_WARNING("unknown entry in section " + section_name + ": " + key);
-                    return Error::config_invalid;
-                }
-            }
-
-            // Validate required fields
-            if (persistent.lower_directory.empty() || persistent.upper_directory.empty() ||
-                persistent.work_directory.empty() || persistent.merge_directory.empty()) {
-                LOG_ERROR("missing required field in section " + section_name);
-                return Error::config_invalid;
+            const Error parse_err = overlay_config::parse_persistent_section(
+                section_name, section_data, persistent);
+            if (parse_err != Error::none) {
+                return parse_err;
             }
         } else {
             LOG_ERROR("unknown section in overlay.ini: " + section_name);

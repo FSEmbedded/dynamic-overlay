@@ -100,9 +100,13 @@ Error Mount::mount_overlay_persistent(const OverlayDescription::Persistent &cont
     mount_args.append(container.lower_directory);
     mount_args.append(",index=on,xino=auto");
 
+    const unsigned long flags =
+        static_cast<unsigned long>(MS_NODEV) |
+        (container.nosuid ? static_cast<unsigned long>(MS_NOSUID) : 0UL);
+
     const int mount_state = ::mount("overlay",
                                      container.merge_directory.c_str(),
-                                     "overlay", 0,
+                                     "overlay", flags,
                                      mount_args.c_str());
     if (mount_state != 0) {
         LOG_ERRNO("mount overlay persistent", errno);

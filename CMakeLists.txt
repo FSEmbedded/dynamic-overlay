@@ -123,6 +123,7 @@ set(SOURCES
     src/preinit.cpp
     src/u-boot.cpp
     src/dynamic_mounting.cpp
+    src/overlay_config.cpp
     src/persistent_mem_detector.cpp
     src/device_parser.cpp
     src/create_link.cpp

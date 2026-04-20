@@ -17,13 +17,19 @@ namespace OverlayDescription
         std::string work_directory;
         std::string merge_directory;
         std::string upper_directory;
+        // Default-secure: upperdir is user-writable, so honoring setuid on
+        // the merged view would turn any upperdir write into persistent root.
+        // Opt out per-section in overlay.ini when the merge path legitimately
+        // hosts setuid binaries from the signed lowerdir (e.g. /usr/bin).
+        bool nosuid = true;
 
         bool operator==(const Persistent &other) const noexcept
         {
             return lower_directory == other.lower_directory &&
                    work_directory == other.work_directory &&
                    merge_directory == other.merge_directory &&
-                   upper_directory == other.upper_directory;
+                   upper_directory == other.upper_directory &&
+                   nosuid == other.nosuid;
         }
 
         bool operator!=(const Persistent &other) const noexcept

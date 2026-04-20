@@ -22,6 +22,7 @@ set(TEST_SOURCES
     test_device_parser.cpp
     test_dynamic_mounting_helpers.cpp
     test_scope_guard.cpp
+    test_overlay_config.cpp
 )
 
 add_executable(dynamic_overlay_tests ${TEST_SOURCES})
@@ -41,6 +42,7 @@ target_sources(dynamic_overlay_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src/posix_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/ini_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/device_parser.cpp
+    ${CMAKE_SOURCE_DIR}/src/overlay_config.cpp
 )
 
 target_compile_definitions(dynamic_overlay_tests PRIVATE ENABLE_LOGGING)
