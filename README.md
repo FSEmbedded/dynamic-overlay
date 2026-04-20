@@ -17,14 +17,21 @@ step-by-step flow.
 # Cross-compile (SDK_ROOT defaults to /opt/fslc-xwayland/5.15-scarthgap)
 ./scripts/build.sh debug          # Debug build
 ./scripts/build.sh release        # Release build (-Os, LTO)
+./scripts/build.sh sanitize       # Debug build with ASan + UBSan
 ./scripts/build.sh debug --x509   # With X.509 certificate store
 
-# Native test build
-./scripts/build.sh test           # Build and run 107 unit tests
+# Native test build + run full gtest suite
+./scripts/build.sh test
+
+# Wipe all build directories
+./scripts/build.sh clean
 
 # Override SDK location
 SDK_ROOT=/path/to/sdk ./scripts/build.sh debug
 ```
+
+Test sources live in `tests/` — see `tests/CMakeLists.txt` for the
+currently registered cases.
 
 ### Dependencies
 
@@ -81,16 +88,22 @@ Full reference: [overlay.ini Reference](docs/overlay_ini_reference.md)
 
 ## Troubleshooting
 
-**"Could not determine current memory type"**
-- Check `/sys/bdinfo/boot_dev` or `/proc/cmdline` contains valid boot device info
+Log messages below are the `LOG_ERROR` strings emitted to `/dev/kmsg`
+(or `stderr` in test builds) — grep `dmesg` for these substrings.
 
-**"Application image not found"**
-- Verify squashfs exists at `/rw_fs/root/application/app_[a|b].squashfs`
-- Check U-Boot `application` variable
+**`could not determine memory type (NAND|eMMC)`**
+- `PersistentMemDetector::create` could not resolve the boot device via
+  `/sys/bdinfo/boot_dev` or `/proc/cmdline root=`
+- Verify the vendor sysfs or kernel cmdline on this board
 
-**"Maximum fs stacking depth exceeded"**
-- Linux kernel limits overlay stacking to 2 levels
-- Reduce nested overlays in configuration
+**`application image not found: <path>`**
+- Selected squashfs missing at `/rw_fs/root/application/app_[a|b].squashfs`
+- Check the U-Boot `application` variable and the A/B fallback path
+
+**Kernel: `maximum fs stacking depth exceeded` (EBUSY on overlay mount)**
+- Linux caps overlay stacking at 2 levels
+- Reduce nested overlays; do not overlay a path that is itself backed by
+  an overlay
 
 ### Debug Logging
 

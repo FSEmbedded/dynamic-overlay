@@ -61,6 +61,14 @@ Shared foundation (used by all modules above):
 │          │  │          │  │              │  │              │
 │ ABI enum │  │ /dev/kmsg│  │ FdGuard      │  │ trim, split  │
 │ 34 codes │  │ compile  │  │ ScopeGuard   │  │ join, lower  │
-│          │  │ out      │  │ File I/O     │  │              │
+│          │  │ out      │  │ DirGuard     │  │              │
 └──────────┘  └──────────┘  └──────────────┘  └──────────────┘
+
+┌──────────────┐  ┌──────────────┐  ┌──────────────────┐
+│ ini_parser   │  │device_parser │  │  overlay_config  │
+│              │  │              │  │                  │
+│ INI → map    │  │ /proc/cmdline│  │ PersistentMemory │
+│ ordered keys │  │ root= parser │  │ section parser,  │
+│              │  │              │  │ nosuid schema    │
+└──────────────┘  └──────────────┘  └──────────────────┘
 ```

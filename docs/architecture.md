@@ -171,6 +171,7 @@ All system resources use RAII:
 | File descriptors | `FdGuard` (loop devices, raw partitions, config files) |
 | Scope cleanup | `ScopeGuard` (tmpfs unmount, temp file removal) |
 | `DIR*` handles | `DirGuard` (UBI volume scan, recursive chown) |
+| `blkid_cache` | `BlkidCacheGuard` (eMMC partition discovery in `persistent_mem_detector`) |
 | libuboot context | `UBootCtxGuard` (init/open/close/exit lifecycle) |
 | libarchive handles | `unique_ptr` with custom deleters |
 
