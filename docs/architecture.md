@@ -90,7 +90,7 @@ Low-level mount operations using Linux syscalls directly.
 | Persistent overlay | `mount(overlay)` with `upperdir=...,workdir=...,lowerdir=...,index=on` |
 
 Mount-flag hardening: `nosuid=false` opt-out schema and parser-rejection
-behavior are in [`overlay_ini_reference.md`](overlay_ini_reference.md).
+behavior are in [`overlay.ini Reference`](reference/overlay-ini.md).
 Implementation is split across `src/main.cpp` (data partition),
 `src/mount.cpp` (overlay mounts), and `src/overlay_config.cpp`
 (per-section parsing).

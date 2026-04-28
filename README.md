@@ -64,7 +64,7 @@ mergedir=/etc
 - **ApplicationFolder** entries create read-only overlays (app content over system)
 - **PersistentMemory** sections create read-write overlays (changes survive reboots)
 
-Full reference: [overlay.ini Reference](docs/overlay_ini_reference.md)
+Full reference: [overlay.ini Reference](docs/reference/overlay-ini.md)
 
 ### U-Boot Variables
 
@@ -80,7 +80,7 @@ Full reference: [overlay.ini Reference](docs/overlay_ini_reference.md)
 | Document | Content |
 |----------|---------|
 | [Architecture](docs/architecture.md) | Module design, error handling, build config |
-| [overlay.ini Reference](docs/overlay_ini_reference.md) | Configuration file format |
+| [overlay.ini Reference](docs/reference/overlay-ini.md) | Configuration file format |
 | [Boot Sequence](docs/diagrams/boot_sequence.md) | Step-by-step preinit flow |
 | [Component Architecture](docs/diagrams/component_architecture.md) | Module dependency diagram |
 | [Mount Sequence](docs/diagrams/mount_sequence.md) | Overlay processing flow |
@@ -113,6 +113,13 @@ Log messages below are the `LOG_ERROR` strings emitted to `/dev/kmsg`
 ```
 
 Output goes to `/dev/kmsg` during preinit, `stderr` in test builds.
+
+## Related Components
+
+| Component | Purpose |
+|-----------|---------|
+| [fs-updater-lib](https://github.com/fsembedded/fs-updater-lib/blob/main/README.md) | Core update library; writes the U-Boot state variables this binary reads at boot |
+| [fs-updater-cli](https://github.com/fsembedded/fs-updater-cli/blob/main/README.md) | CLI frontend for `fs-updater-lib`; triggers the update cycles that change A/B slot state |
 
 ## License
 
