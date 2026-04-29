@@ -118,8 +118,8 @@ Output goes to `/dev/kmsg` during preinit, `stderr` in test builds.
 
 | Component | Purpose |
 |-----------|---------|
-| [fs-updater-lib](https://github.com/fsembedded/fs-updater-lib/blob/main/README.md) | Core update library; writes the U-Boot state variables this binary reads at boot |
-| [fs-updater-cli](https://github.com/fsembedded/fs-updater-cli/blob/main/README.md) | CLI frontend for `fs-updater-lib`; triggers the update cycles that change A/B slot state |
+| [fs-updater-lib](https://github.com/fsembedded/fs-updater-lib/blob/master/README.md) | Core update library; writes the U-Boot state variables this binary reads at boot |
+| [fs-updater-cli](https://github.com/fsembedded/fs-updater-cli/blob/master/README.md) | CLI frontend for `fs-updater-lib`; triggers the update cycles that change A/B slot state |
 
 ## License
 
