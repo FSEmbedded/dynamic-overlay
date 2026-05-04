@@ -281,6 +281,14 @@ Error create_link::create_link_to_system_conf(PersistentMemDetector::MemType typ
     }
 
     const std::string destination(config::rauc_system_conf_path);
+    const auto parent = parent_path(destination);
+
+    if (!posix_utils::path_exists(parent)) {
+        const Error err = posix_utils::mkdir_p(parent);
+        if (err != Error::none) {
+            return err;
+        }
+    }
 
     if (!posix_utils::path_exists(destination)) {
         const Error err = posix_utils::copy_file(source, destination);
