@@ -229,13 +229,16 @@ Error x509_store::extract_archive(std::string_view archive_path,
             continue;
         }
 
-        // Name whitelist: du-config.json, *.cert.pem, *.key.pem only.
+        // Name whitelist: du-config.json, *.cert.pem, *.chain.pem, *.key.pem only.
+        // Field devices provision certs under either the .cert.pem or the
+        // .chain.pem naming convention; both must be accepted.
         const auto ends_with = [](std::string_view s, std::string_view suf) noexcept {
             return s.size() >= suf.size()
                 && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
         };
         if (rel != "du-config.json"
             && !ends_with(rel, ".cert.pem")
+            && !ends_with(rel, ".chain.pem")
             && !ends_with(rel, ".key.pem")) {
             LOG_WARNING("skipping archive entry outside whitelist: " + std::string(rel));
             continue;
