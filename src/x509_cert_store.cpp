@@ -25,6 +25,8 @@ inline constexpr int DEFAULT_SECTOR_SIZE = 512;
 // this. Cap is defense against tampered or corrupted Secure-partition input.
 inline constexpr la_int64_t MAX_ENTRY_BYTES    = 64  * 1024;   // 64 KiB
 inline constexpr std::size_t MAX_ARCHIVE_BYTES = 128 * 1024;   // 128 KiB
+// Container path written by provisioning tools before the /etc/adu layout.
+inline constexpr std::string_view kLegacyX509Container{"/adu/x509_c"};
 } // anonymous namespace
 
 namespace {
@@ -84,7 +86,17 @@ Error x509_store::CertStore::promoteDuJsonConfig(std::string_view staged_config_
         LOG_ERROR("staged du-config.json has empty iotHubName");
         return Error::config_invalid;
     }
-    if (src["x509_container"].asString() != std::string(config::target_archiv_dir_path)) {
+    const std::string container = src["x509_container"].asString();
+    if (container == kLegacyX509Container) {
+        // Older provisioning tools wrote pre-/etc/adu paths; map them onto
+        // the pinned layout instead of losing the device identity.
+        LOG_WARNING("staged du-config.json uses legacy x509_container, rewriting to pinned paths");
+        root["agents"][0]["connectionSource"]["x509_container"] = config::target_archiv_dir_path;
+        root["downloadsFolder"] = config::fus_azure_downloads_dir;
+        Json::StreamWriterBuilder writer;
+        writer["indentation"] = "    ";
+        content = Json::writeString(writer, root);
+    } else if (container != std::string(config::target_archiv_dir_path)) {
         LOG_ERROR("staged du-config.json x509_container does not match pinned path");
         return Error::config_invalid;
     }

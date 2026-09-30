@@ -52,5 +52,6 @@ These options are only relevant when `BUILD_X509_CERTIFICATE_STORE_MOUNT=ON`.
 |--------|---------|-------------|
 | `TARGET_ARCHIV_DIR_PATH` | _(empty)_ | tmpfs mount point for extracted certificate archive |
 | `FUS_AZURE_CONFIGURATION` | _(empty)_ | Azure DU config path |
+| `FUS_AZURE_DOWNLOADS_DIR` | _(empty)_ | Azure DU downloads folder; replaces the legacy value in a staged config |
 | `PART_NAME_MTD_CERT` | _(empty)_ | MTD partition name for the certificate store (NAND) |
 | `EMMC_SECURE_PART_BLK_NR` | _(empty)_ | eMMC secure partition block number |
